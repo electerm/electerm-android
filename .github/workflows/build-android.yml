@@ -54,10 +54,12 @@ jobs:
 
       - name: Ensure nodejs-mobile gradle variable is defined
         # @capawesome/capacitor-nodejs expects $nodejsMobileVersion to be set.
+        # Append on its own line (variables.gradle has no trailing newline, so a
+        # plain `echo >>` would concatenate onto the closing `}` and break Gradle).
         run: |
           cd build/android/android
           grep -q "nodejsMobileVersion" variables.gradle || \
-            echo "nodejsMobileVersion = '18.20.4-capawesome.1'" >> variables.gradle
+            printf '\nnodejsMobileVersion = "18.20.4-capawesome.1"\n' >> variables.gradle
 
       - name: Apply icon / splash overlay
         run: cp -r build/android/res-overlay/. build/android/android/app/src/main/res/
