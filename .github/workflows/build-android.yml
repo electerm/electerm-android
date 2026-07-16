@@ -80,13 +80,17 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'android' }}
         run: |
           cd build/android/android
+          # Gradle resolves the injected store.file relative to the :app module
+          # dir (build/android/android/app), so generate the keystore there and
+          # pass the same absolute path to gradle.
+          KEYSTORE="$PWD/app/release.keystore"
           keytool -genkey -v \
-            -keystore release.keystore -alias electerm \
+            -keystore "$KEYSTORE" -alias electerm \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
             -dname "CN=electerm"
           ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file=release.keystore \
+            -Pandroid.injected.signing.store.file="$KEYSTORE" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias=electerm \
             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
