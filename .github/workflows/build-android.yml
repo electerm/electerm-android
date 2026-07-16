@@ -34,8 +34,11 @@ jobs:
       - name: Install required Android SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
+      - name: ci init
+        run: npm config set legacy-peer-deps true
+
       - name: Install root dependencies (electerm + build tooling)
-        run: npm ci
+        run: npm i
 
       - name: Install Capacitor dependencies
         run: npm --prefix build/android install
