@@ -62,7 +62,14 @@ jobs:
             printf '\next.nodejsMobileVersion = "18.20.4-capawesome.1"\n' >> variables.gradle
 
       - name: Apply icon / splash overlay
-        run: cp -r build/android/res-overlay/. build/android/android/app/src/main/res/
+        run: |
+          cp -r build/android/res-overlay/. build/android/android/app/src/main/res/
+          # Capacitor's default template ships its own drawable/splash.png and
+          # values/ic_launcher_background.xml. These collide with our overlay's
+          # splash.xml / colors-electerm.xml (same resource name, different file),
+          # so drop the template's copies after overlaying ours.
+          rm -f build/android/android/app/src/main/res/drawable/splash.png
+          rm -f build/android/android/app/src/main/res/values/ic_launcher_background.xml
 
       - name: Build debug APK
         run: cd build/android/android && chmod +x gradlew && ./gradlew assembleDebug
