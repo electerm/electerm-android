@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# generated build output (rebuilt by `npm run build` / CI)
+www/
+.gen/
+
+# generated native android project (rebuilt by `cap add android` in CI)
+android/
+
+# local signing key
+*.keystore

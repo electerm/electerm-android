@@ -1,0 +1,61 @@
+/**
+ * handle sync with github/gitee
+ */
+
+import {
+  electermSync
+} from 'electerm-sync'
+import log from '../common/log.js'
+import rp from 'axios'
+import { createProxyAgent } from '../lib/proxy-agent.js'
+import { doWebdavSync } from './webdav-sync.js'
+
+rp.defaults.proxy = false
+
+async function doSync (type, func, args, token, proxy) {
+  // Handle WebDAV sync separately
+  if (type === 'webdav') {
+    return doWebdavSync(func, args, token, proxy)
+  }
+  const agent = createProxyAgent(proxy)
+  const conf = agent
+    ? {
+        httpsAgent: agent
+      }
+    : {
+        proxy: false
+      }
+  const axiosInst = rp.create(conf)
+  if (type === 'cloud') {
+    args[0] = ''
+  }
+  return electermSync(axiosInst, type, func, args, token)
+    .then(r => {
+      return r
+    })
+    .catch(e => {
+      log.error('sync error')
+      log.error(e.message)
+      return {
+        error: e
+      }
+    })
+}
+
+export default async function wsSyncHandler (ws, msg) {
+  const { id, type, args, func, token, proxy } = msg
+  const res = await doSync(type, func, args, token, proxy)
+  if (res.error) {
+    ws.s({
+      error: {
+        message: 'sync error: ' + res.error.message
+      },
+      id
+    })
+  } else {
+    ws.s({
+      data: res,
+      id
+    })
+  }
+}

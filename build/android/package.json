@@ -1,0 +1,19 @@
+{
+  "name": "electerm-android",
+  "version": "4.15.138",
+  "private": true,
+  "type": "module",
+  "description": "electerm for Android — a free and open-source terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client, built with Capacitor + a Node.js runtime.",
+  "scripts": {
+    "assets": "python3 scripts/gen-assets.py",
+    "build": "node build.mjs",
+    "sync": "cap sync android",
+    "android": "npm run build && cap add android && cap sync android"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/cli": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
+    "@capawesome/capacitor-nodejs": "^0.1.0"
+  }
+}

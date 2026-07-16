@@ -1,0 +1,19 @@
+
+.dialog-file-item
+  user-select none
+  padding 6px 10px
+  &:hover
+    background-color var(--primary)
+    color var(--primary-contrast)
+  &.selected
+    background-color var(--primary)
+    color var(--primary-contrast)
+.file-dialog-list-wrap
+  height calc(min(600px, 90vh) - 200px)
+  overflow-y auto
+.file-dialog-header
+  .sftp-title
+    .anticon-eye-invisible
+    .anticon-home
+    .anticon-plus
+      display none

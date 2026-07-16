@@ -1,0 +1,90 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  build:
+    name: Build electerm Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Java (JDK 21)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install required Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install root dependencies (electerm + build tooling)
+        run: npm ci
+
+      - name: Install Capacitor dependencies
+        run: npm --prefix build/android install
+
+      - name: Build web frontend + Node.js backend bundle
+        run: npm run build:android
+
+      - name: Add Android platform (first run only)
+        run: cd build/android && [ -d android ] || npx cap add android
+
+      - name: Sync Capacitor (copies web assets + native plugins)
+        run: cd build/android && npx cap sync android
+
+      - name: Ensure nodejs-mobile gradle variable is defined
+        # @capawesome/capacitor-nodejs expects $nodejsMobileVersion to be set.
+        run: |
+          cd build/android/android
+          grep -q "nodejsMobileVersion" variables.gradle || \
+            echo "nodejsMobileVersion = '18.20.4-capawesome.1'" >> variables.gradle
+
+      - name: Apply icon / splash overlay
+        run: cp -r build/android/res-overlay/. build/android/android/app/src/main/res/
+
+      - name: Build debug APK
+        run: cd build/android/android && chmod +x gradlew && ./gradlew assembleDebug
+
+      - name: Build release APK (signed with ephemeral keystore)
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'android' }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'android' }}
+        run: |
+          cd build/android/android
+          keytool -genkey -v \
+            -keystore release.keystore -alias electerm \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
+            -dname "CN=electerm"
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=release.keystore \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias=electerm \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: electerm-android-apks
+          path: |
+            build/android/android/app/build/outputs/apk/debug/*.apk
+            build/android/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
