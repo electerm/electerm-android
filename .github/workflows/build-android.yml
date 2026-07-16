@@ -59,7 +59,7 @@ jobs:
         run: |
           cd build/android/android
           grep -q "nodejsMobileVersion" variables.gradle || \
-            printf '\nnodejsMobileVersion = "18.20.4-capawesome.1"\n' >> variables.gradle
+            printf '\next.nodejsMobileVersion = "18.20.4-capawesome.1"\n' >> variables.gradle
 
       - name: Apply icon / splash overlay
         run: cp -r build/android/res-overlay/. build/android/android/app/src/main/res/
