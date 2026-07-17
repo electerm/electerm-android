@@ -3,19 +3,32 @@
     overflow-x hidden !important
 
 // Fix custom modal not rendering content on Android WebView.
-// The original .custom-modal-wrap has overflow:auto on a position:fixed
-// element; the inner .custom-modal-container is position:relative which
-// causes the content card to not render inside the scrollable fixed
-// container on Android WebView (mask shows, content doesn't).
-// Override: move overflow:auto to the container and make it position:fixed.
-#container .custom-modal-wrap
-  overflow visible
+//
+// Root cause: the original .custom-modal-wrap is position:fixed WITH
+// overflow:auto. On Android WebView, overflow:auto (or scroll) on a
+// position:fixed element does not render its children — the mask shows
+// but the content card is invisible.
+//
+// The previous fix moved overflow:auto to .custom-modal-container and made
+// that position:fixed — but that is the SAME bug (overflow:auto on
+// position:fixed). It only moved the problem one level down.
+//
+// Correct fix:
+//   1. .custom-modal-wrap     → overflow:hidden (no scroll on the fixed layer)
+//   2. .custom-modal-container → height:100% + overflow:auto
+//      (position stays relative from modal.styl; overflow:auto works fine
+//      on position:relative elements in Android WebView)
+//
+// Use `body` prefix for specificity: this override is imported early (in
+// basic.js, before the app bundle), while modal.styl is imported by the Modal
+// component (loaded later). With equal specificity the later rule wins, so we
+// need the extra `body` ancestor to raise specificity above modal.styl.
+// `body` covers both modals inside #container AND Modal.info()/Modal.confirm()
+// instances that are appended directly to document.body.
+body .custom-modal-wrap
+  overflow hidden
 
-#container .custom-modal-container
-  position fixed
-  top 0
-  left 0
-  right 0
-  bottom 0
-  overflow auto
+body .custom-modal-container
+  height 100%
   min-height auto
+  overflow auto
