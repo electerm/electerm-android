@@ -422,13 +422,33 @@ await import('./app.bundle.mjs')
 // not been created yet (e.g. during a pure `npm run build` before `cap add`).
 function applyResOverlay () {
   const overlayDir = path.resolve(__dirname, 'res-overlay')
-  const resDir = path.resolve(__dirname, 'android', 'app', 'src', 'main', 'res')
+  const mainDir = path.resolve(__dirname, 'android', 'app', 'src', 'main')
+  const resDir = path.resolve(mainDir, 'res')
   if (!fs.existsSync(resDir)) {
     console.log('[android] native project not found, skipping res-overlay (run cap add android + cap sync first)')
     return
   }
   console.log('[android] applying res-overlay →', resDir)
-  copyDir(overlayDir, resDir)
+
+  // AndroidManifest.xml must go at app/src/main/, NOT inside res/.
+  // cap sync regenerates the default Capacitor manifest; overwrite it with
+  // the electerm version that sets the custom icon, splash theme, and
+  // cleartext-traffic / network-security-config.
+  const manifestSrc = path.resolve(overlayDir, 'AndroidManifest.xml')
+  if (fs.existsSync(manifestSrc)) {
+    const manifestDest = path.resolve(mainDir, 'AndroidManifest.xml')
+    fs.copyFileSync(manifestSrc, manifestDest)
+    console.log('[android] wrote', manifestDest)
+  }
+
+  // Copy every *other* entry (drawable, mipmap-*, values, xml, …) into res/.
+  for (const entry of fs.readdirSync(overlayDir, { withFileTypes: true })) {
+    if (entry.name === 'AndroidManifest.xml') continue
+    const s = path.join(overlayDir, entry.name)
+    const d = path.join(resDir, entry.name)
+    if (entry.isDirectory()) copyDir(s, d)
+    else fs.copyFileSync(s, d)
+  }
 }
 
 // --------------------------------------------------------------------------

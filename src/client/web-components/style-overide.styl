@@ -1,3 +1,21 @@
 @-moz-document url-prefix()
   .tabs-inner
     overflow-x hidden !important
+
+// Fix custom modal not rendering content on Android WebView.
+// The original .custom-modal-wrap has overflow:auto on a position:fixed
+// element; the inner .custom-modal-container is position:relative which
+// causes the content card to not render inside the scrollable fixed
+// container on Android WebView (mask shows, content doesn't).
+// Override: move overflow:auto to the container and make it position:fixed.
+#container .custom-modal-wrap
+  overflow visible
+
+#container .custom-modal-container
+  position fixed
+  top 0
+  left 0
+  right 0
+  bottom 0
+  overflow auto
+  min-height auto
