@@ -252,6 +252,24 @@ class Stmt {
 // \p{ID_Continue} — Unicode property escapes that require full ICU support.
 // We replace them with ASCII-equivalent character classes; route parameter
 // names are always ASCII in practice, so the behaviour is identical.
+// esbuild plugin: mark all .node native-addon files as external.
+// Before the session.js refactor the dynamic `import(\`./session-${type}.js\`)`
+// was opaque to esbuild, so it never traversed into session-ssh.js and its
+// dependencies (ssh2 → cpu-features → cpufeatures.node, sshcrypto.node).
+// Now that session.js uses static imports esbuild sees those .node files and
+// errors because it has no loader for them.  Marking them external is correct:
+// the native binaries are not present on Android anyway and the libraries that
+// use them have pure-JS fallbacks guarded by try/catch.
+const nativeNodePlugin = {
+  name: 'native-node-files',
+  setup (build) {
+    build.onResolve({ filter: /\.node$/ }, (args) => ({
+      path: args.path,
+      external: true
+    }))
+  }
+}
+
 const patchPathToRegexpPlugin = {
   name: 'patch-path-to-regexp',
   setup (build) {
@@ -308,7 +326,7 @@ async function bundleBackend (shimPath) {
     banner: {
       js: "import { createRequire } from 'module'; import { fileURLToPath as __etu } from 'url'; const require = createRequire(import.meta.url); const __filename = __etu(import.meta.url); const __dirname = __etu(new URL('.', import.meta.url));"
     },
-    plugins: [patchPathToRegexpPlugin],
+    plugins: [nativeNodePlugin, patchPathToRegexpPlugin],
     // keep node built-ins external; everything else is bundled
     logLevel: 'info'
   })
