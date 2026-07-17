@@ -215,6 +215,37 @@ class Stmt {
   return shimPath
 }
 
+// esbuild plugin: rewrite path-to-regexp v8 Unicode property-escape regexes
+// so they run on the on-device Node 18 build (which lacks \p{...} support
+// inside character classes due to its stripped ICU data).
+//
+// path-to-regexp v8 defines three regexes that use \p{ID_Start} and
+// \p{ID_Continue} — Unicode property escapes that require full ICU support.
+// We replace them with ASCII-equivalent character classes; route parameter
+// names are always ASCII in practice, so the behaviour is identical.
+const patchPathToRegexpPlugin = {
+  name: 'patch-path-to-regexp',
+  setup (build) {
+    build.onLoad({ filter: /path-to-regexp/ }, async (args) => {
+      let src = await fs.promises.readFile(args.path, 'utf8')
+      src = src
+        .replace(
+          '/^[$_\\p{ID_Start}]$/u',
+          '/^[$_a-zA-Z]$/'
+        )
+        .replace(
+          '/^[$\\u200c\\u200d\\p{ID_Continue}]$/u',
+          '/^[$\\u200c\\u200da-zA-Z0-9_]$/'
+        )
+        .replace(
+          '/^[$_\\p{ID_Start}][$\\u200c\\u200d\\p{ID_Continue}]*$/u',
+          '/^[$_a-zA-Z][$\\u200c\\u200da-zA-Z0-9_]*$/'
+        )
+      return { contents: src, loader: 'js' }
+    })
+  }
+}
+
 async function bundleBackend (shimPath) {
   console.log('[android] bundling backend (esbuild)…')
   await esbuild.build({
@@ -244,6 +275,7 @@ async function bundleBackend (shimPath) {
     banner: {
       js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
     },
+    plugins: [patchPathToRegexpPlugin],
     // keep node built-ins external; everything else is bundled
     logLevel: 'info'
   })
@@ -308,6 +340,7 @@ await import('./app.bundle.mjs')
   )
 }
 
+// --------------------------------------------------------------------------
 // --------------------------------------------------------------------------
 async function main () {
   fs.rmSync(WWW, { recursive: true, force: true })
