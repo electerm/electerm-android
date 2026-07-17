@@ -63,29 +63,37 @@ jobs:
 
       - name: Apply icon / splash overlay
         run: |
-          cp -r build/android/res-overlay/. build/android/android/app/src/main/res/
+          MANIFEST_SRC=build/android/res-overlay/AndroidManifest.xml
+          MANIFEST_DST=build/android/android/app/src/main/AndroidManifest.xml
+
+          # AndroidManifest.xml must go at app/src/main/, NOT inside res/.
+          # Copy the electerm manifest (with icon, theme, network config) to
+          # the correct location, overwriting Capacitor's default.
+          if [ -f "$MANIFEST_SRC" ]; then
+            cp "$MANIFEST_SRC" "$MANIFEST_DST"
+            echo "Overlayed AndroidManifest.xml -> $MANIFEST_DST"
+          fi
+
+          # Copy every other entry (drawable, mipmap-*, values, xml) into res/.
+          for entry in build/android/res-overlay/*/; do
+            [ -d "$entry" ] || continue
+            name=$(basename "$entry")
+            cp -r "$entry" "build/android/android/app/src/main/res/$name"
+          done
+          # Also copy any non-directory files in res-overlay (except the manifest)
+          for f in build/android/res-overlay/*; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            [ "$name" = "AndroidManifest.xml" ] && continue
+            cp "$f" "build/android/android/app/src/main/res/$name"
+          done
+
           # Capacitor's default template ships its own drawable/splash.png and
           # values/ic_launcher_background.xml. These collide with our overlay's
           # splash.xml / colors-electerm.xml (same resource name, different file),
           # so drop the template's copies after overlaying ours.
           rm -f build/android/android/app/src/main/res/drawable/splash.png
           rm -f build/android/android/app/src/main/res/values/ic_launcher_background.xml
-
-      - name: Permit cleartext to the local Node.js backend in the manifest
-        # The on-device Node.js backend serves the UI + API over plain http on
-        # 127.0.0.1:5577. The app targets SDK 36, which blocks cleartext by
-        # default. res-overlay/AndroidManifest.xml sets usesCleartextTraffic +
-        # networkSecurityConfig, but the overlay step above copies it into res/
-        # (where AndroidManifest.xml is ignored) instead of merging it, so the
-        # attributes never reach the compiled manifest. Inject them directly
-        # into the merged main manifest so http://127.0.0.1:5577 is reachable.
-        run: |
-          MF=build/android/android/app/src/main/AndroidManifest.xml
-          grep -q 'usesCleartextTraffic' "$MF" || \
-            sed -i 's|<application|<application android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml/network_security_config"|' "$MF"
-          grep -q 'ACCESS_NETWORK_STATE' "$MF" || \
-            sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n</manifest>#' "$MF"
-          grep -n 'usesCleartextTraffic\|networkSecurityConfig' "$MF"
 
       - name: Configure per-ABI APK splits
         # Produce one APK per architecture (arm64-v8a, armeabi-v7a, x86_64)
