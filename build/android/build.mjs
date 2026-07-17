@@ -457,8 +457,8 @@ function applyResOverlay () {
   //
   //   drawable-v24/ic_launcher_foreground.xml
   //     Capacitor's vector foreground. On API 24+ (Android 7.0+) it takes
-  //     precedence over our drawable/ic_launcher_foreground.png, so the
-  //     adaptive icon shows the generic Capacitor logo instead of electerm.
+  //     precedence over our density-specific ic_launcher_foreground.png, so
+  //     the adaptive icon shows the generic Capacitor logo instead of electerm.
   //
   //   values/ic_launcher_background.xml
   //     Defines the same `ic_launcher_background` color as our
@@ -467,9 +467,10 @@ function applyResOverlay () {
   //   drawable/splash.png
   //     Same resource name as our drawable/splash.xml → conflict.
   //
-  //   mipmap-*/ic_launcher_round.png + mipmap-anydpi-v26/ic_launcher_round.xml
-  //     Capacitor's default round icons. Not referenced by our manifest, but
-  //     some launchers auto-discover them; remove so only electerm icons remain.
+  // NOTE: ic_launcher_round.png / ic_launcher_round.xml are NOT removed —
+  // the overlay provides electerm round icons (referenced by
+  // android:roundIcon in the manifest) that overwrite Capacitor's defaults
+  // during the copy above.  Removing them would delete our own icons.
   const conflicts = [
     'drawable-v24/ic_launcher_foreground.xml',
     'values/ic_launcher_background.xml',
@@ -481,20 +482,6 @@ function applyResOverlay () {
       fs.rmSync(f, { force: true })
       console.log('[android] removed conflicting resource:', rel)
     }
-  }
-  // Remove round icon resources (per-density PNGs + adaptive XML).
-  for (const entry of fs.readdirSync(resDir, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !entry.name.startsWith('mipmap-')) continue
-    const roundPng = path.join(resDir, entry.name, 'ic_launcher_round.png')
-    if (fs.existsSync(roundPng)) {
-      fs.rmSync(roundPng, { force: true })
-      console.log('[android] removed conflicting resource:', entry.name + '/ic_launcher_round.png')
-    }
-  }
-  const roundXml = path.join(resDir, 'mipmap-anydpi-v26', 'ic_launcher_round.xml')
-  if (fs.existsSync(roundXml)) {
-    fs.rmSync(roundXml, { force: true })
-    console.log('[android] removed conflicting resource: mipmap-anydpi-v26/ic_launcher_round.xml')
   }
 }
 

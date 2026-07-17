@@ -7,7 +7,7 @@ Outputs everything into ../build/android/res-overlay so the CI build can copy
 it over the Capacitor-generated android/ project.
 """
 import os
-from PIL import Image
+from PIL import Image, ImageDraw
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 TEMP = os.path.join(ROOT, "temp")
@@ -19,7 +19,33 @@ WORDMARK = os.path.join(TEMP, "electerm.png")            # 766x266 RGBA, transpa
 # Brand background colour (electerm dark slate)
 BG = (21, 23, 26, 255)          # #15171a
 BG_HEX = "#15171a"
-COLOR_XML = BG_HEX
+
+# Adaptive icon foreground densities (108dp canvas at each density).
+# The foreground MUST be at the correct density so Android renders it at
+# 108dp.  Previously a single 432px PNG sat in drawable/ (treated as mdpi =
+# 432dp), which made the foreground 4x too large on the 108dp adaptive-icon
+# canvas — the logo was massively cropped.
+FOREGROUND_DENSITIES = {
+    "drawable-mdpi": 108,    # 108dp @ 1x
+    "drawable-hdpi": 162,    # 108dp @ 1.5x
+    "drawable-xhdpi": 216,   # 108dp @ 2x
+    "drawable-xxhdpi": 324,  # 108dp @ 3x
+    "drawable-xxxhdpi": 432, # 108dp @ 4x
+}
+
+# Legacy launcher icon densities
+LEGACY_DENSITIES = {
+    "mipmap-mdpi": 48,
+    "mipmap-hdpi": 72,
+    "mipmap-xhdpi": 96,
+    "mipmap-xxhdpi": 144,
+    "mipmap-xxxhdpi": 192,
+}
+
+# Logo size as a fraction of the icon canvas.
+# Adaptive icon safe zone = 66dp / 108dp ≈ 61%.
+# 60% keeps the logo comfortably inside the safe zone on all launchers.
+LOGO_FRACTION = 0.60
 
 os.makedirs(RES, exist_ok=True)
 
@@ -51,54 +77,88 @@ def load_wordmark(height):
     return im.resize((new_w, new_h), Image.LANCZOS)
 
 
+def make_circular_bg(size, color):
+    """Create a circular background with anti-aliased edges (transparent
+    corners outside the circle).  Supersampled at 4x then downscaled for
+    smooth circle edges."""
+    scale = 4
+    big = size * scale
+    canvas = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    draw.ellipse((0, 0, big - 1, big - 1), fill=color)
+    return canvas.resize((size, size), Image.LANCZOS)
+
+
 # ---------------------------------------------------------------------------
 # Adaptive icon foreground (108dp canvas, logo kept inside the 66dp safe zone)
-# Provided once at xxxhdpi (432px); Android scales down for lower densities.
+# Generated at every standard density so Android never has to upscale.
 # ---------------------------------------------------------------------------
 def gen_foreground():
-    out = os.path.join(RES, "drawable")
-    ensure_dir(out)
-    canvas = Image.new("RGBA", (432, 432), (0, 0, 0, 0))
-    logo = load_logo(max_size=int(432 * 0.62))
-    paste_centered(canvas, logo)
-    canvas.save(os.path.join(out, "ic_launcher_foreground.png"))
+    # Remove the old single-density foreground that used to live in drawable/.
+    # (432px in drawable/ was treated as mdpi = 432dp, 4x too large for the
+    # 108dp adaptive-icon canvas.)
+    old_fg = os.path.join(RES, "drawable", "ic_launcher_foreground.png")
+    if os.path.exists(old_fg):
+        os.remove(old_fg)
+        print("Removed old foreground:", old_fg)
 
-
-# ---------------------------------------------------------------------------
-# Legacy (pre-26) full launcher icons: logo on brand background.
-# ---------------------------------------------------------------------------
-def gen_legacy():
-    densities = {
-        "mipmap-mdpi": 48,
-        "mipmap-hdpi": 72,
-        "mipmap-xhdpi": 96,
-        "mipmap-xxhdpi": 144,
-        "mipmap-xxxhdpi": 192,
-    }
-    for folder, size in densities.items():
+    for folder, size in FOREGROUND_DENSITIES.items():
         out = os.path.join(RES, folder)
         ensure_dir(out)
-        canvas = Image.new("RGBA", (size, size), BG)
-        logo = load_logo(max_size=int(size * 0.62))
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        logo = load_logo(max_size=int(size * LOGO_FRACTION))
         paste_centered(canvas, logo)
+        canvas.save(os.path.join(out, "ic_launcher_foreground.png"))
+
+
+# ---------------------------------------------------------------------------
+# Legacy (pre-26) launcher icons.
+#
+# Both ic_launcher.png and ic_launcher_round.png use a CIRCULAR brand
+# background with transparent corners.  This ensures the icon looks round
+# even on launchers that don't mask adaptive icons (e.g. some tablet
+# launchers that display all icons as circles).  On API 26+ the adaptive
+# icon XML is used instead and the launcher applies its own mask shape.
+# ---------------------------------------------------------------------------
+def gen_legacy():
+    for folder, size in LEGACY_DENSITIES.items():
+        out = os.path.join(RES, folder)
+        ensure_dir(out)
+        # Circular brand background with transparent corners
+        bg = make_circular_bg(size, BG)
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        canvas.paste(bg, (0, 0), bg)
+        # Logo on top, centred within the safe zone
+        logo = load_logo(max_size=int(size * LOGO_FRACTION))
+        paste_centered(canvas, logo)
+        # ic_launcher.png and ic_launcher_round.png are identical — both
+        # already circular so no square border is visible on any launcher.
         canvas.save(os.path.join(out, "ic_launcher.png"))
+        canvas.save(os.path.join(out, "ic_launcher_round.png"))
 
 
 # ---------------------------------------------------------------------------
 # Adaptive icon XML + background colour.
+# Both ic_launcher.xml and ic_launcher_round.xml reference the same
+# foreground/background; the launcher's own mask shape is applied either way.
 # ---------------------------------------------------------------------------
-def gen_adaptive_xml():
-    out = os.path.join(RES, "mipmap-anydpi-v26")
-    ensure_dir(out)
-    with open(os.path.join(out, "ic_launcher.xml"), "w") as f:
-        f.write(
-            """<?xml version="1.0" encoding="utf-8"?>
+ADAPTIVE_XML = """<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>
 """
-        )
+
+def gen_adaptive_xml():
+    out = os.path.join(RES, "mipmap-anydpi-v26")
+    ensure_dir(out)
+    with open(os.path.join(out, "ic_launcher.xml"), "w") as f:
+        f.write(ADAPTIVE_XML)
+    # Round variant — referenced by android:roundIcon in the manifest.
+    # Launchers that specifically request a round icon get the same adaptive
+    # icon; the launcher's circular mask is applied on top.
+    with open(os.path.join(out, "ic_launcher_round.xml"), "w") as f:
+        f.write(ADAPTIVE_XML)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +236,8 @@ def gen_values():
 
 # ---------------------------------------------------------------------------
 # AndroidManifest overlay (full file; copied over the generated one).
+# Includes android:roundIcon so tablet launchers that look for a round icon
+# get the electerm round icon instead of falling back to the square default.
 # ---------------------------------------------------------------------------
 def gen_manifest():
     with open(os.path.join(RES, "AndroidManifest.xml"), "w") as f:
@@ -185,6 +247,7 @@ def gen_manifest():
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
