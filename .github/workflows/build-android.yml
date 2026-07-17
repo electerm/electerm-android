@@ -122,7 +122,8 @@ jobs:
         run: |
           cd build/android/android
           KEYSTORE="$PWD/app/release.keystore"
-          echo "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" -storepass "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
           ./gradlew assembleRelease \
             -Pandroid.injected.signing.store.file="$KEYSTORE" \
             -Pandroid.injected.signing.store.password="$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
