@@ -7,8 +7,9 @@
   "scripts": {
     "assets": "python3 scripts/gen-assets.py",
     "build": "node build.mjs",
-    "sync": "cap sync android",
-    "android": "npm run build && cap add android && cap sync android"
+    "overlay": "node build.mjs --overlay-only",
+    "sync": "cap sync android && node build.mjs --overlay-only",
+    "android": "npm run build && cap add android; cap sync android && node build.mjs --overlay-only"
   },
   "devDependencies": {
     "@capacitor/android": "^8.4.2",

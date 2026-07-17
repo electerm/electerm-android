@@ -383,8 +383,34 @@ await import('./app.bundle.mjs')
 }
 
 // --------------------------------------------------------------------------
+// 5. Overlay electerm icons/splash into the native Android project
+// --------------------------------------------------------------------------
+// `cap sync` regenerates android/app/src/main/res from Capacitor's default
+// templates, which replaces the electerm launcher icon with the generic
+// Capacitor icon. Applying the overlay *after* every sync keeps the correct
+// branding in place.  This function is a no-op when the android project has
+// not been created yet (e.g. during a pure `npm run build` before `cap add`).
+function applyResOverlay () {
+  const overlayDir = path.resolve(__dirname, 'res-overlay')
+  const resDir = path.resolve(__dirname, 'android', 'app', 'src', 'main', 'res')
+  if (!fs.existsSync(resDir)) {
+    console.log('[android] native project not found, skipping res-overlay (run cap add android + cap sync first)')
+    return
+  }
+  console.log('[android] applying res-overlay →', resDir)
+  copyDir(overlayDir, resDir)
+}
+
+// --------------------------------------------------------------------------
 // --------------------------------------------------------------------------
 async function main () {
+  // --overlay-only: just re-apply the res-overlay after `cap sync` without
+  // rebuilding the entire www bundle. Used by the `sync` npm script.
+  if (process.argv.includes('--overlay-only')) {
+    applyResOverlay()
+    return
+  }
+
   fs.rmSync(WWW, { recursive: true, force: true })
   fs.mkdirSync(NODEJS_DIR, { recursive: true })
 
@@ -396,6 +422,11 @@ async function main () {
   await bundleBackend(shimPath)
   writeNodeEntry()
   copyEnv()
+
+  // Apply icons after building www (no-op if native project doesn't exist yet).
+  // The `sync` and `android` npm scripts re-run `node build.mjs --overlay-only`
+  // after `cap sync` to restore the icons that cap sync resets.
+  applyResOverlay()
 
   console.log('[android] web + node project ready at', WWW)
 }
