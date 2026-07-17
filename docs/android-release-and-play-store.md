@@ -15,7 +15,7 @@ For GitHub Releases and direct sideloading, the signing key should be **stable**
 
 ### What the current repo does
 
-The CI workflow currently generates an **ephemeral keystore** during the release job and uses it to sign the release APK. That is enough for a one-off artifact download, but it is not good for long-term updates because the key changes every run.
+The CI workflow decodes a **persistent keystore** from GitHub Secrets (`ANDROID_RELEASE_KEYSTORE_BASE64`) and uses it to sign all release APKs with the same key. This ensures stable update continuity for sideloaded installs.
 
 ### What to do instead
 
@@ -28,28 +28,50 @@ Recommended setup:
 3. Store the keystore password, key password, and alias in GitHub Secrets.
 4. Make the Android build workflow load those secrets and sign release APKs with that same keystore every time.
 
-### Suggested secret names
+### Generate the keystore
 
-- `ANDROID_RELEASE_KEYSTORE_BASE64`
-- `ANDROID_RELEASE_KEYSTORE_PASSWORD`
-- `ANDROID_RELEASE_KEY_PASSWORD`
-- `ANDROID_RELEASE_KEY_ALIAS`
+Run these commands on a secure machine (not in CI). The keystore file is the only thing you keep locally.
 
-Base64-encoding the keystore is often the easiest way to store it in GitHub Secrets.
+```bash
+keytool -genkey -v \
+  -keystore release.keystore \
+  -alias electerm \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000 \
+  -storepass YOUR_KEYSTORE_PASSWORD \
+  -keypass YOUR_KEY_PASSWORD \
+  -dname "CN=electerm, OU=electerm, O=electerm, L=Unknown, ST=Unknown, C=US"
+```
 
-### Example signing flow
+Replace `YOUR_KEYSTORE_PASSWORD` and `YOUR_KEY_PASSWORD` with strong passwords.
 
-At release time:
+### Encode and store in GitHub Secrets
 
-1. Decode the keystore secret into a temporary file in the workflow runner.
-2. Pass the keystore path and passwords to Gradle.
-3. Build the release APK.
-4. Publish the resulting APK to GitHub Releases.
+Base64-encode the keystore file and store the result along with the other values as GitHub Actions secrets.
+
+```bash
+# macOS / Linux
+base64 -i release.keystore | pbcopy        # macOS
+base64 -w 0 release.keystore               # Linux (print to stdout)
+
+# Windows (PowerShell)
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("release.keystore")) | Set-Clipboard
+```
+
+Set these four secrets in your GitHub repository (Settings → Secrets and variables → Actions):
+
+| Secret name | Value |
+|---|---|
+| `ANDROID_RELEASE_KEYSTORE_BASE64` | The base64-encoded keystore content |
+| `ANDROID_RELEASE_KEYSTORE_PASSWORD` | The `-storepass` value you chose |
+| `ANDROID_RELEASE_KEY_PASSWORD` | The `-keypass` value you chose |
+| `ANDROID_RELEASE_KEY_ALIAS` | The `-alias` value you chose (e.g. `electerm`) |
 
 ### Operational rules
 
 - Never commit the keystore into git.
-- Back up the keystore offline.
+- Back up the keystore file offline (e.g. encrypted USB or password manager).
 - Keep the alias and passwords documented somewhere safe.
 - If the keystore is lost, app update continuity is lost for sideloaded releases.
 
