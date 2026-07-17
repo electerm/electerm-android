@@ -47,7 +47,11 @@ window.pre = {
     'resume',
     'destroy'
   ],
-  osInfo: () => { return window.pre.osInfoData },
+  // Safe defaults for API-dependent data to prevent render crashes
+  // before /api/get-constants response arrives (fixes Android info-modal
+  // showing only background with no content)
+  osInfoData: [],
+  osInfo: () => { return window.pre.osInfoData || [] },
   extIconPath: window.et.extIconPath,
   readClipboard: () => {
     return window.et.clipboard || ''
@@ -97,7 +101,32 @@ window.pre = {
     window.open(url, '_blank')
   },
   runSync,
-  runGlobalAsync
+  runGlobalAsync,
+  versions: {}
+}
+
+// Ensure window.et.packInfo has all fields required by info-modal.jsx
+// On Android/Capacitor the packInfo is minimal and missing author/bugs/releases/etc.
+const _packInfoDefaults = {
+  author: {
+    name: 'ZHAO Xudong',
+    email: 'zxdong@gmail.com',
+    url: 'https://github.com/zxdong262'
+  },
+  homepage: 'https://electerm.org',
+  bugs: {
+    url: 'https://github.com/electerm/electerm/issues'
+  },
+  releases: 'https://github.com/electerm/electerm/releases',
+  sponsorLink: 'https://electerm.org/sponsor-electerm/',
+  knownIssuesLink: 'https://github.com/electerm/electerm/wiki/Known-issues',
+  langugeRepo: 'https://github.com/electerm/electerm-languages'
+}
+if (window.et.packInfo) {
+  window.et.packInfo = {
+    ...window.et.packInfo,
+    ..._packInfoDefaults
+  }
 }
 
 const fs = {

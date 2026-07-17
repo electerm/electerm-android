@@ -7,13 +7,15 @@
   "scripts": {
     "assets": "python3 scripts/gen-assets.py",
     "build": "node build.mjs",
-    "sync": "cap sync android",
-    "android": "npm run build && cap add android && cap sync android"
+    "overlay": "node build.mjs --overlay-only",
+    "sync": "cap sync android && node build.mjs --overlay-only",
+    "android": "npm run build && cap add android; cap sync android && node build.mjs --overlay-only"
   },
   "devDependencies": {
     "@capacitor/android": "^8.4.2",
     "@capacitor/cli": "^8.4.2",
     "@capacitor/core": "^8.4.2",
-    "@capawesome/capacitor-nodejs": "^0.1.0"
+    "@capawesome/capacitor-nodejs": "^0.1.0",
+    "typescript": "^5.7.0"
   }
 }

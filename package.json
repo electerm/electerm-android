@@ -1,6 +1,6 @@
 {
   "name": "electerm-android",
-  "version": "4.15.138",
+  "version": "4.15.140",
   "description": "electerm for Android — a free and open-source terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client, built on the electerm-web codebase with Capacitor.",
   "main": "src/app/app.js",
   "type": "module",
@@ -98,7 +98,7 @@
     "electerm-sync": "2.0.0",
     "esbuild": "^0.28.1",
     "sql.js": "^1.12.0",
-    "express": "5.2.1",
+    "express": "4.22.2",
     "express-jwt": "^8.5.1",
     "express-ws": "5.0.2",
     "fast-deep-equal": "3.1.3",

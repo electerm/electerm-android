@@ -15,6 +15,16 @@ const config: CapacitorConfig = {
   appId: 'org.electerm.electerm',
   appName: 'electerm',
   webDir: 'www',
+  // The loading page is served from the Capacitor local server and then
+  // redirects (top-level navigation) to the on-device Node.js backend at
+  // http://127.0.0.1:5577. Using the http scheme (instead of the default
+  // https) avoids mixed-content blocking of that http backend.
+  server: {
+    androidScheme: 'http',
+    // Keep navigation to the backend host in-app (don't hand it to the system
+    // browser, which can't reach the app's private loopback port anyway).
+    allowNavigation: ['127.0.0.1']
+  },
   plugins: {
     Nodejs: {
       // directory (relative to webDir) that holds the Node.js project

@@ -121,17 +121,46 @@ function writeLoadingPage () {
     <div class="msg" id="msg">Starting engine…</div>
   </div>
   <script>
+    // Reach the on-device Node.js backend at http://127.0.0.1:5577.
+    // Subresource probes are unreliable here:
+    //   - fetch()        -> Chromium Private Network Access ("Failed to fetch")
+    //   - CapacitorHttp  -> works only where the native client allows cleartext
+    // A top-level navigation is NOT a subresource (PNA does not apply) and the
+    // network-security-config permits cleartext to 127.0.0.1, so once the engine
+    // is up we navigate. allowNavigation:["127.0.0.1"] keeps it in-app.
     var PORT = 5577;
     var BASE = 'http://127.0.0.1:' + PORT + '/';
+    var Http = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+    var done = false;
+    function go (src) {
+      if (done) return;
+      done = true;
+      location.replace(BASE);
+    }
     function tryLoad () {
-      fetch(BASE, { mode: 'no-cors' })
-        .then(function () { location.replace(BASE); })
-        .catch(function () {
-          document.getElementById('msg').textContent = 'Waiting for engine…';
-          setTimeout(tryLoad, 700);
-        });
+      if (Http) {
+        Http.get({ url: BASE })
+          .then(function (r) {
+            if (r && r.status >= 200 && r.status < 500) go('capacitorhttp');
+            else setTimeout(tryLoad, 700);
+          })
+          .catch(function () {
+            document.getElementById('msg').textContent = 'Waiting for engine…';
+            setTimeout(tryLoad, 700);
+          });
+      } else {
+        fetch(BASE, { mode: 'no-cors' })
+          .then(function () { go('fetch'); })
+          .catch(function () {
+            document.getElementById('msg').textContent = 'Waiting for engine…';
+            setTimeout(tryLoad, 700);
+          });
+      }
     }
     tryLoad();
+    // Fallback: probes blocked on this device -> after the engine has had time
+    // to come up (~1-2s), navigate directly (works because navigation is exempt).
+    setTimeout(function () { go('timeout'); }, 4000);
   </script>
 </body>
 </html>
@@ -215,6 +244,55 @@ class Stmt {
   return shimPath
 }
 
+// esbuild plugin: rewrite path-to-regexp v8 Unicode property-escape regexes
+// so they run on the on-device Node 18 build (which lacks \p{...} support
+// inside character classes due to its stripped ICU data).
+//
+// path-to-regexp v8 defines three regexes that use \p{ID_Start} and
+// \p{ID_Continue} — Unicode property escapes that require full ICU support.
+// We replace them with ASCII-equivalent character classes; route parameter
+// names are always ASCII in practice, so the behaviour is identical.
+// esbuild plugin: mark all .node native-addon files as external.
+// Before the session.js refactor the dynamic `import(\`./session-${type}.js\`)`
+// was opaque to esbuild, so it never traversed into session-ssh.js and its
+// dependencies (ssh2 → cpu-features → cpufeatures.node, sshcrypto.node).
+// Now that session.js uses static imports esbuild sees those .node files and
+// errors because it has no loader for them.  Marking them external is correct:
+// the native binaries are not present on Android anyway and the libraries that
+// use them have pure-JS fallbacks guarded by try/catch.
+const nativeNodePlugin = {
+  name: 'native-node-files',
+  setup (build) {
+    build.onResolve({ filter: /\.node$/ }, (args) => ({
+      path: args.path,
+      external: true
+    }))
+  }
+}
+
+const patchPathToRegexpPlugin = {
+  name: 'patch-path-to-regexp',
+  setup (build) {
+    build.onLoad({ filter: /path-to-regexp/ }, async (args) => {
+      let src = await fs.promises.readFile(args.path, 'utf8')
+      src = src
+        .replace(
+          '/^[$_\\p{ID_Start}]$/u',
+          '/^[$_a-zA-Z]$/'
+        )
+        .replace(
+          '/^[$\\u200c\\u200d\\p{ID_Continue}]$/u',
+          '/^[$\\u200c\\u200da-zA-Z0-9_]$/'
+        )
+        .replace(
+          '/^[$_\\p{ID_Start}][$\\u200c\\u200d\\p{ID_Continue}]*$/u',
+          '/^[$_a-zA-Z][$\\u200c\\u200da-zA-Z0-9_]*$/'
+        )
+      return { contents: src, loader: 'js' }
+    })
+  }
+}
+
 async function bundleBackend (shimPath) {
   console.log('[android] bundling backend (esbuild)…')
   await esbuild.build({
@@ -238,12 +316,17 @@ async function bundleBackend (shimPath) {
       'node-bash',
       'font-list'
     ],
-    // Some bundled CJS deps (e.g. dotenv) do `require('fs')`. In an ESM bundle
-    // esbuild's `__require` shim throws "Dynamic require not supported" unless a
-    // real `require` exists — provide one via createRequire.
+    // Some bundled CJS deps (e.g. sql.js's initSqlJs) reference __dirname /
+    // __filename, which don't exist in an ESM bundle. Define them from
+    // import.meta.url. NOTE: do NOT `import { dirname } from "path"` here —
+    // the bundle already imports `dirname` at top level, which would collide
+    // ("Identifier 'dirname' has already been declared"). Alias fileURLToPath
+    // to a private name for the same reason, and derive __dirname from a
+    // directory URL.
     banner: {
-      js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
+      js: "import { createRequire } from 'module'; import { fileURLToPath as __etu } from 'url'; const require = createRequire(import.meta.url); const __filename = __etu(import.meta.url); const __dirname = __etu(new URL('.', import.meta.url));"
     },
+    plugins: [nativeNodePlugin, patchPathToRegexpPlugin],
     // keep node built-ins external; everything else is bundled
     logLevel: 'info'
   })
@@ -264,6 +347,14 @@ import { fileURLToPath } from 'node:url'
 
 const __d = fileURLToPath(new URL('.', import.meta.url))
 
+// The embedded Node.js engine starts with cwd "/" (Android filesystem root),
+// not the nodejs-project directory. electerm's runtime-constants.js reads
+// "package.json" via resolve(process.cwd(), 'package.json'), so without
+// chdir it tries to open "/package.json" -> ENOENT -> uncaught exception ->
+// the Node process exits and the app crashes (SIGSEGV during teardown).
+// Switch cwd to the project directory before loading the backend bundle.
+process.chdir(__d)
+
 // Runtime configuration for the on-device electerm server.
 process.env.NODE_ENV = 'production'
 process.env.HOST = '127.0.0.1'
@@ -273,7 +364,8 @@ process.env.PORT = '5577'
 process.env.SERVER_SECRET = 'electerm-android-local-dev-secret'
 // No real pty on Android -> disable the local terminal feature.
 process.env.DISABLE_LOCAL_TERMINAL = '1'
-// Tell the server where it was deployed (cwd on device is the node project dir).
+// Tell the server where the pug views live (cwd is now the node project dir,
+// set above via process.chdir(__d)).
 process.env.VIEW_FOLDER = resolve(__d, 'views')
 
 // Stable, app-private user-data directory.
@@ -295,6 +387,18 @@ const userDataDir = (() => {
 })()
 process.env.DB_PATH = userDataDir
 
+// Android does not set a meaningful HOME directory. The Node.js runtime
+// (and os.homedir()) falls back to /data, which the app process cannot
+// access, causing "EACCES: permission denied" when electerm tries to
+// enumerate SSH keys from ~/.ssh.  Point HOME at the writable user-data
+// directory so that:
+//   - os.homedir() returns a path the app can read/write
+//   - SSH keys stored in <userDataDir>/.ssh are found automatically
+//   - The .ssh dir is created once on first launch
+const sshDir = resolve(userDataDir, '.ssh')
+mkdirSync(sshDir, { recursive: true })
+process.env.HOME = userDataDir
+
 await import('./app.bundle.mjs')
 `
   fs.writeFileSync(path.resolve(NODEJS_DIR, 'index.js'), entry)
@@ -309,7 +413,101 @@ await import('./app.bundle.mjs')
 }
 
 // --------------------------------------------------------------------------
+// 5. Overlay electerm icons/splash into the native Android project
+// --------------------------------------------------------------------------
+// `cap sync` regenerates android/app/src/main/res from Capacitor's default
+// templates, which replaces the electerm launcher icon with the generic
+// Capacitor icon. Applying the overlay *after* every sync keeps the correct
+// branding in place.  This function is a no-op when the android project has
+// not been created yet (e.g. during a pure `npm run build` before `cap add`).
+function applyResOverlay () {
+  const overlayDir = path.resolve(__dirname, 'res-overlay')
+  const mainDir = path.resolve(__dirname, 'android', 'app', 'src', 'main')
+  const resDir = path.resolve(mainDir, 'res')
+  if (!fs.existsSync(resDir)) {
+    console.log('[android] native project not found, skipping res-overlay (run cap add android + cap sync first)')
+    return
+  }
+  console.log('[android] applying res-overlay →', resDir)
+
+  // AndroidManifest.xml must go at app/src/main/, NOT inside res/.
+  // cap sync regenerates the default Capacitor manifest; overwrite it with
+  // the electerm version that sets the custom icon, splash theme, and
+  // cleartext-traffic / network-security-config.
+  const manifestSrc = path.resolve(overlayDir, 'AndroidManifest.xml')
+  if (fs.existsSync(manifestSrc)) {
+    const manifestDest = path.resolve(mainDir, 'AndroidManifest.xml')
+    fs.copyFileSync(manifestSrc, manifestDest)
+    console.log('[android] wrote', manifestDest)
+  }
+
+  // Copy every *other* entry (drawable, mipmap-*, values, xml, …) into res/.
+  for (const entry of fs.readdirSync(overlayDir, { withFileTypes: true })) {
+    if (entry.name === 'AndroidManifest.xml') continue
+    const s = path.join(overlayDir, entry.name)
+    const d = path.join(resDir, entry.name)
+    if (entry.isDirectory()) copyDir(s, d)
+    else fs.copyFileSync(s, d)
+  }
+
+  // Remove Capacitor's default resources that conflict with the overlay.
+  // These are generated by `cap add android` / `cap sync` and must be
+  // deleted AFTER the overlay copy, otherwise they shadow or conflict with
+  // the electerm resources:
+  //
+  //   drawable-v24/ic_launcher_foreground.xml
+  //     Capacitor's vector foreground. On API 24+ (Android 7.0+) it takes
+  //     precedence over our drawable/ic_launcher_foreground.png, so the
+  //     adaptive icon shows the generic Capacitor logo instead of electerm.
+  //
+  //   values/ic_launcher_background.xml
+  //     Defines the same `ic_launcher_background` color as our
+  //     colors-electerm.xml → duplicate-resource build error.
+  //
+  //   drawable/splash.png
+  //     Same resource name as our drawable/splash.xml → conflict.
+  //
+  //   mipmap-*/ic_launcher_round.png + mipmap-anydpi-v26/ic_launcher_round.xml
+  //     Capacitor's default round icons. Not referenced by our manifest, but
+  //     some launchers auto-discover them; remove so only electerm icons remain.
+  const conflicts = [
+    'drawable-v24/ic_launcher_foreground.xml',
+    'values/ic_launcher_background.xml',
+    'drawable/splash.png'
+  ]
+  for (const rel of conflicts) {
+    const f = path.join(resDir, rel)
+    if (fs.existsSync(f)) {
+      fs.rmSync(f, { force: true })
+      console.log('[android] removed conflicting resource:', rel)
+    }
+  }
+  // Remove round icon resources (per-density PNGs + adaptive XML).
+  for (const entry of fs.readdirSync(resDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith('mipmap-')) continue
+    const roundPng = path.join(resDir, entry.name, 'ic_launcher_round.png')
+    if (fs.existsSync(roundPng)) {
+      fs.rmSync(roundPng, { force: true })
+      console.log('[android] removed conflicting resource:', entry.name + '/ic_launcher_round.png')
+    }
+  }
+  const roundXml = path.join(resDir, 'mipmap-anydpi-v26', 'ic_launcher_round.xml')
+  if (fs.existsSync(roundXml)) {
+    fs.rmSync(roundXml, { force: true })
+    console.log('[android] removed conflicting resource: mipmap-anydpi-v26/ic_launcher_round.xml')
+  }
+}
+
+// --------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 async function main () {
+  // --overlay-only: just re-apply the res-overlay after `cap sync` without
+  // rebuilding the entire www bundle. Used by the `sync` npm script.
+  if (process.argv.includes('--overlay-only')) {
+    applyResOverlay()
+    return
+  }
+
   fs.rmSync(WWW, { recursive: true, force: true })
   fs.mkdirSync(NODEJS_DIR, { recursive: true })
 
@@ -321,6 +519,11 @@ async function main () {
   await bundleBackend(shimPath)
   writeNodeEntry()
   copyEnv()
+
+  // Apply icons after building www (no-op if native project doesn't exist yet).
+  // The `sync` and `android` npm scripts re-run `node build.mjs --overlay-only`
+  // after `cap sync` to restore the icons that cap sync resets.
+  applyResOverlay()
 
   console.log('[android] web + node project ready at', WWW)
 }

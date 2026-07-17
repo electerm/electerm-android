@@ -1,3 +1,39 @@
 @-moz-document url-prefix()
   .tabs-inner
     overflow-x hidden !important
+
+// Fix custom modal not rendering content on Android WebView.
+//
+// Root cause: the original .custom-modal-wrap is position:fixed WITH
+// overflow:auto. On Android WebView, overflow on a position:fixed element
+// does not render its children — the mask shows but the content card is
+// invisible. Changing overflow to hidden (previous attempt) did not help
+// because even overflow:hidden on position:fixed can trigger the same bug.
+//
+// Fix: switch .custom-modal-wrap and .custom-modal-mask from position:fixed
+// to position:absolute. The original overflow:auto / position:relative /
+// min-height:100% from modal.styl all work correctly on position:absolute
+// elements in Android WebView. Since the modal covers the full viewport
+// (top/left/right/bottom:0) and the app body does not scroll, absolute
+// behaves identically to fixed here.
+//
+// Use `body` prefix for specificity: this override is imported early (in
+// basic.js, before the app bundle), while modal.styl is imported by the Modal
+// component (loaded later). With equal specificity the later rule wins, so we
+// need the extra `body` ancestor to raise specificity above modal.styl.
+// `body` covers both modals inside #container AND Modal.info()/Modal.confirm()
+// instances that are appended directly to document.body.
+body .custom-modal-wrap
+  position absolute
+  overflow visible
+
+body .custom-modal-mask
+  position absolute
+
+body .custom-modal-container
+  position relative
+  overflow visible
+
+body .custom-modal-content
+  position relative
+  overflow visible
