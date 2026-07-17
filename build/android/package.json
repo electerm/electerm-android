@@ -3,7 +3,7 @@
   "version": "4.15.138",
   "private": true,
   "type": "module",
-  "description": "electerm for Android — a free and open-source terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client, built with Capacitor + a Node.js runtime.",
+  "description": "electerm for Android — a free and open-source ssh/sftp/telnet/RDP/VNC/Spice/ftp client, built with Capacitor + a Node.js runtime.",
   "scripts": {
     "assets": "python3 scripts/gen-assets.py",
     "build": "node build.mjs",

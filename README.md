@@ -1,34 +1,86 @@
-# electerm for Android
+<h1 align="center" style="padding-top: 60px;padding-bottom: 40px;">
+  <a href="https://electerm.org">
+    <img src="https://github.com/electerm/electerm-resource/raw/master/static/images/electerm.png" alt="electerm" />
+  </a>
+</h1>
 
-> **electerm** is a free and open-source terminal/ssh/sftp/telnet/serialport/RDP/VNC/Spice/ftp client.
-> This repository builds the **Android** app on top of the electerm-web codebase using
-> [Capacitor](https://capacitorjs.com/) plus an on-device Node.js runtime.
 
-electerm runs on Linux, macOS and Windows as a desktop app. Here it is packaged as a
-native Android application: the electerm **frontend** (React) is rendered in a WebView,
-and the electerm **backend** (the Node.js server that talks SSH/SFTP/Telnet/FTP/RDP/VNC/Spice)
-runs directly on the device inside a Node.js runtime provided by
-[`@capawesome/capacitor-nodejs`](https://capawesome.io/docs/sdks/capacitor/nodejs/).
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/electerm/electerm-android/blob/main/LICENSE)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/electerm?label=Sponsors)](https://github.com/sponsors/electerm)
+[![English](https://img.shields.io/badge/English-EN-blue)](README.md)
+[![中文](https://img.shields.io/badge/中文-Chinese-blue)](README_cn.md)
+
+Open-sourced ssh/sftp/telnet/RDP/VNC/Spice/ftp client for Android, built on top of the
+[electerm-web](https://github.com/electerm/electerm-web) codebase with
+[Capacitor](https://capacitorjs.com/) and an on-device Node.js runtime.
+
+> **Note on local terminal & serial port:** electerm for Android currently does
+> **not** support the local terminal or serial port. These features rely on
+> native libraries (`node-pty`, `serialport`) that can not be built for Android
+> at the moment. There is potential to add them in the future once the native
+> dependencies are ported. SSH, SFTP, Telnet, FTP, RDP, VNC and Spice all work
+> because they are network protocols implemented in pure JS / WASM.
+
+- [electerm.org](https://electerm.org): Homepage, downloads, videos, etc
+- [electerm-web](https://github.com/electerm/electerm-web): Web app version running in browser(including mobile device)
+- [electerm-web-docker](https://github.com/electerm/electerm-web-docker): Docker image for electerm-web
+- [electerm online](https://cloud.electerm.org): Public free online electerm app
+- [electerm demo](https://demo.electerm.org): Online demo of electerm
+- [electerm AI](https://ai.electerm.org): Free AI for electerm users
+- [electerm deb repo](https://repos.electerm.org/deb): Debian repo of electerm
+- [electerm rpm repo](https://repos.electerm.org/rpm): RPM repo of electerm
+
+## How it works
+
+```
+WebView (frontend)  ── http://127.0.0.1:5577 ──►  Node.js backend (on device)
+   loads index.html                                    serves UI + SSH/SFTP/...
+   (local "loading" page)                              API/WebSocket on same origin
+```
+
+- **Capacitor** provides the native Android shell + WebView.
+- **`@capawesome/capacitor-nodejs`** embeds a Node.js runtime and auto-starts the
+  electerm backend when the app launches.
+- The electerm **frontend** (React) is rendered in a WebView; the electerm
+  **backend** (the Node.js server that talks SSH/SFTP/Telnet/FTP/RDP/VNC/Spice)
+  runs directly on the device.
 
 ## Features
 
 - 🖥️ SSH / SSH tunnel (proxy) / SFTP / FTP / FTPS
 - 🐚 Telnet
-- 🔌 Serial port\*
 - 🖥️ Remote desktop: RDP / VNC / Spice
 - 🔁 Zmodem (rz/sz), trzsz file transfer
 - 🌐 Multi-language, themes, bookmarks, sync
+- ❌ Local terminal — **not available** (native `node-pty` can not be built for Android yet)
+- ❌ Serial port — **not available** (native `serialport` can not be built for Android yet)
 
-\* Serial port and the local system terminal require native bindings that are not
-available in the on-device Node.js runtime, so they are disabled on Android for now
-(see [build/android/README.md](build/android/README.md) for details).
+> Local terminal and serial port may be added in the future once the required
+> native libraries are ported to Android.
 
-## Quick start (for users)
+## Install
 
-1. Download the latest APK from the **Actions → Build Android APK** run on GitHub
-   (artifact `electerm-android-apks`). Install it on your Android device
-   (you may need to allow "Install from unknown sources").
-2. Open electerm, wait a moment for the engine to start, and connect to your hosts.
+1. Download the latest APK from the
+   [Releases page](https://github.com/electerm/electerm-android/releases).
+   Pick the APK that matches your device:
+   - `arm64-v8a` — most modern Android phones/tablets (64-bit ARM)
+   - `armeabi-v7a` — older 32-bit ARM devices
+   - `x86_64` — Android emulators / Intel tablets
+   - `universal` — works on all architectures (larger download)
+2. Install it on your Android device (you may need to allow
+   "Install from unknown sources").
+3. Open electerm, wait a moment for the engine to start, and connect to your hosts.
+
+## Upgrade
+
+Just download the latest APK from the
+[Releases page](https://github.com/electerm/electerm-android/releases) and
+reinstall.
+
+## Known issues
+
+- Local terminal and serial port are disabled on Android (see note above).
+- The device must allow "Install from unknown sources" for sideloaded APKs.
 
 ## Project layout
 
@@ -40,11 +92,66 @@ build/android/       Android build scripts, Capacitor project, native assets
   capacitor.config.ts
   res-overlay/       generated launcher icons + splash (from temp/ logos)
   android/           native project (generated by `cap add android`)
-.github/workflows/   CI that builds + uploads the APK
+.github/workflows/   CI that builds + releases the APK
 ```
 
 See [build/android/README.md](build/android/README.md) for how to build and test locally.
 
+## Dev
+
+```bash
+# needs nodejs/npm 24.x and Java JDK 17+ (21 recommended)
+# needs Android SDK (platform-36, build-tools 36.0.0)
+npm config set legacy-peer-deps true
+npm i
+npm --prefix build/android install
+
+# build the web frontend + Node.js backend bundle into build/android/www
+npm run build:android
+
+# create the native project + sync assets/plugins (first time only)
+cd build/android
+npx cap add android
+npx cap sync android
+
+# build debug APK
+cd android
+./gradlew assembleDebug
+```
+
+The debug APK lands at
+`build/android/android/app/build/outputs/apk/debug/app-debug.apk`.
+
+Install on a device:
+
+```bash
+adb install build/android/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+## Sponsor this project
+
+github sponsor
+
+[https://github.com/sponsors/electerm](https://github.com/sponsors/electerm)
+
+kofi
+
+[https://ko-fi.com/zhaoxudong](https://ko-fi.com/zhaoxudong)
+
+wechat donate
+
+[![wechat donate](https://electerm.org/electerm-wechat-donate.png)](https://github.com/electerm)
+
+TRON TRN20
+
+[![TRN20 donate](https://github.com/electerm/electerm-resource/blob/master/static/images/trn20.png?raw=true)]
+
+Address: TXk3pQNmQu1vihH76RaEFnK9wg13x4LLCZ
+
+## Contact author
+
+[zxdong@gmail.com](mailto:zxdong@gmail.com)
+
 ## License
 
-MIT — same as upstream electerm.
+MIT

@@ -2,12 +2,18 @@ name: Build Android APK
 
 on:
   push:
-    branches: [dev]
+    branches: [ build ]
 
+# GitHub Actions already skips workflows when the commit message contains
+# [skip ci], [ci skip], [no ci], [skip actions], or [actions skip].
+# The job-level `if` below is an explicit, belt-and-suspenders guard.
 jobs:
   build:
     name: Build electerm Android APK
     runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && !contains(github.event.head_commit.message, '[no ci]') && !contains(github.event.head_commit.message, '[skip actions]') && !contains(github.event.head_commit.message, '[actions skip]') }}
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -144,8 +150,10 @@ jobs:
         # electerm-android-{arch}-{version}-debug.apk (debug). The {arch} is
         # parsed from gradle's per-ABI output filename; falls back to
         # "universal" for the universal build (or if splits are off).
+        id: rename
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           APKROOT=build/android/android/app/build/outputs/apk
           mkdir -p "$APKROOT/named"
           for variant in debug release; do
@@ -168,10 +176,76 @@ jobs:
           echo "=== named APKs ==="
           ls -la "$APKROOT/named/"
 
-      - name: Upload APKs
+      - name: Upload APKs (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: electerm-android-apks
           path: build/android/android/app/build/outputs/apk/named/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Delete existing release + tag (if re-run for same version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.rename.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          echo "Checking for existing release/tag: $TAG"
+          gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag || true
+
+      - name: Create draft release and upload APK assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.rename.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          APKROOT=build/android/android/app/build/outputs/apk/named
+
+          # Release body with the electerm link list.
+          cat > /tmp/release-notes.md <<'EOF'
+          ## electerm for Android v${VERSION}
+
+          Download the APK that matches your device architecture:
+          - `arm64-v8a` — most modern Android phones/tablets (64-bit ARM)
+          - `armeabi-v7a` — older 32-bit ARM devices
+          - `x86_64` — Android emulators / Intel tablets
+          - `universal` — works on all architectures (larger download)
+
+          > **Note:** Local terminal and serial port are not available on Android
+          > yet (the required native libraries can not be built for Android at the
+          > moment). There is potential to add them in the future. SSH, SFTP,
+          > Telnet, FTP, RDP, VNC and Spice work because they are pure-JS / WASM
+          > network protocols.
+
+          ## Links
+
+          - [electerm.org](https://electerm.org): Homepage, downloads, videos, etc
+          - [electerm-web](https://github.com/electerm/electerm-web): Web app version running in browser(including mobile device)
+          - [electerm-web-docker](https://github.com/electerm/electerm-web-docker): Docker image for electerm-web
+          - [electerm online](https://cloud.electerm.org): Public free online electerm app
+          - [electerm demo](https://demo.electerm.org): Online demo of electerm
+          - [electerm AI](https://ai.electerm.org): Free AI for electerm users
+          - [electerm deb repo](https://repos.electerm.org/deb): Debian repo of electerm
+          - [electerm rpm repo](https://repos.electerm.org/rpm): RPM repo of electerm
+          EOF
+
+          # Substitute the version placeholder (heredoc above is literal).
+          sed -i "s/\${VERSION}/${VERSION}/g" /tmp/release-notes.md
+
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "electerm-android v${VERSION}" \
+            --notes-file /tmp/release-notes.md \
+            --draft \
+            $APKROOT/*.apk
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.rename.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          gh release edit "$TAG" \
+            --repo "${{ github.repository }}" \
+            --draft=false
+          echo "Release $TAG published."
