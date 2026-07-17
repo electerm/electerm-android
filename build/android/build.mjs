@@ -387,6 +387,18 @@ const userDataDir = (() => {
 })()
 process.env.DB_PATH = userDataDir
 
+// Android does not set a meaningful HOME directory. The Node.js runtime
+// (and os.homedir()) falls back to /data, which the app process cannot
+// access, causing "EACCES: permission denied" when electerm tries to
+// enumerate SSH keys from ~/.ssh.  Point HOME at the writable user-data
+// directory so that:
+//   - os.homedir() returns a path the app can read/write
+//   - SSH keys stored in <userDataDir>/.ssh are found automatically
+//   - The .ssh dir is created once on first launch
+const sshDir = resolve(userDataDir, '.ssh')
+mkdirSync(sshDir, { recursive: true })
+process.env.HOME = userDataDir
+
 await import('./app.bundle.mjs')
 `
   fs.writeFileSync(path.resolve(NODEJS_DIR, 'index.js'), entry)
