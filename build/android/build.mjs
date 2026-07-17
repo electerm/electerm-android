@@ -121,17 +121,46 @@ function writeLoadingPage () {
     <div class="msg" id="msg">Starting engine…</div>
   </div>
   <script>
+    // Reach the on-device Node.js backend at http://127.0.0.1:5577.
+    // Subresource probes are unreliable here:
+    //   - fetch()        -> Chromium Private Network Access ("Failed to fetch")
+    //   - CapacitorHttp  -> works only where the native client allows cleartext
+    // A top-level navigation is NOT a subresource (PNA does not apply) and the
+    // network-security-config permits cleartext to 127.0.0.1, so once the engine
+    // is up we navigate. allowNavigation:["127.0.0.1"] keeps it in-app.
     var PORT = 5577;
     var BASE = 'http://127.0.0.1:' + PORT + '/';
+    var Http = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+    var done = false;
+    function go (src) {
+      if (done) return;
+      done = true;
+      location.replace(BASE);
+    }
     function tryLoad () {
-      fetch(BASE, { mode: 'no-cors' })
-        .then(function () { location.replace(BASE); })
-        .catch(function () {
-          document.getElementById('msg').textContent = 'Waiting for engine…';
-          setTimeout(tryLoad, 700);
-        });
+      if (Http) {
+        Http.get({ url: BASE })
+          .then(function (r) {
+            if (r && r.status >= 200 && r.status < 500) go('capacitorhttp');
+            else setTimeout(tryLoad, 700);
+          })
+          .catch(function () {
+            document.getElementById('msg').textContent = 'Waiting for engine…';
+            setTimeout(tryLoad, 700);
+          });
+      } else {
+        fetch(BASE, { mode: 'no-cors' })
+          .then(function () { go('fetch'); })
+          .catch(function () {
+            document.getElementById('msg').textContent = 'Waiting for engine…';
+            setTimeout(tryLoad, 700);
+          });
+      }
     }
     tryLoad();
+    // Fallback: probes blocked on this device -> after the engine has had time
+    // to come up (~1-2s), navigate directly (works because navigation is exempt).
+    setTimeout(function () { go('timeout'); }, 4000);
   </script>
 </body>
 </html>
@@ -269,11 +298,15 @@ async function bundleBackend (shimPath) {
       'node-bash',
       'font-list'
     ],
-    // Some bundled CJS deps (e.g. dotenv) do `require('fs')`. In an ESM bundle
-    // esbuild's `__require` shim throws "Dynamic require not supported" unless a
-    // real `require` exists — provide one via createRequire.
+    // Some bundled CJS deps (e.g. sql.js's initSqlJs) reference __dirname /
+    // __filename, which don't exist in an ESM bundle. Define them from
+    // import.meta.url. NOTE: do NOT `import { dirname } from "path"` here —
+    // the bundle already imports `dirname` at top level, which would collide
+    // ("Identifier 'dirname' has already been declared"). Alias fileURLToPath
+    // to a private name for the same reason, and derive __dirname from a
+    // directory URL.
     banner: {
-      js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
+      js: "import { createRequire } from 'module'; import { fileURLToPath as __etu } from 'url'; const require = createRequire(import.meta.url); const __filename = __etu(import.meta.url); const __dirname = __etu(new URL('.', import.meta.url));"
     },
     plugins: [patchPathToRegexpPlugin],
     // keep node built-ins external; everything else is bundled
@@ -296,6 +329,14 @@ import { fileURLToPath } from 'node:url'
 
 const __d = fileURLToPath(new URL('.', import.meta.url))
 
+// The embedded Node.js engine starts with cwd "/" (Android filesystem root),
+// not the nodejs-project directory. electerm's runtime-constants.js reads
+// "package.json" via resolve(process.cwd(), 'package.json'), so without
+// chdir it tries to open "/package.json" -> ENOENT -> uncaught exception ->
+// the Node process exits and the app crashes (SIGSEGV during teardown).
+// Switch cwd to the project directory before loading the backend bundle.
+process.chdir(__d)
+
 // Runtime configuration for the on-device electerm server.
 process.env.NODE_ENV = 'production'
 process.env.HOST = '127.0.0.1'
@@ -305,7 +346,8 @@ process.env.PORT = '5577'
 process.env.SERVER_SECRET = 'electerm-android-local-dev-secret'
 // No real pty on Android -> disable the local terminal feature.
 process.env.DISABLE_LOCAL_TERMINAL = '1'
-// Tell the server where it was deployed (cwd on device is the node project dir).
+// Tell the server where the pug views live (cwd is now the node project dir,
+// set above via process.chdir(__d)).
 process.env.VIEW_FOLDER = resolve(__d, 'views')
 
 // Stable, app-private user-data directory.

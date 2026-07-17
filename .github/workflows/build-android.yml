@@ -71,6 +71,45 @@ jobs:
           rm -f build/android/android/app/src/main/res/drawable/splash.png
           rm -f build/android/android/app/src/main/res/values/ic_launcher_background.xml
 
+      - name: Permit cleartext to the local Node.js backend in the manifest
+        # The on-device Node.js backend serves the UI + API over plain http on
+        # 127.0.0.1:5577. The app targets SDK 36, which blocks cleartext by
+        # default. res-overlay/AndroidManifest.xml sets usesCleartextTraffic +
+        # networkSecurityConfig, but the overlay step above copies it into res/
+        # (where AndroidManifest.xml is ignored) instead of merging it, so the
+        # attributes never reach the compiled manifest. Inject them directly
+        # into the merged main manifest so http://127.0.0.1:5577 is reachable.
+        run: |
+          MF=build/android/android/app/src/main/AndroidManifest.xml
+          grep -q 'usesCleartextTraffic' "$MF" || \
+            sed -i 's|<application|<application android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml/network_security_config"|' "$MF"
+          grep -q 'ACCESS_NETWORK_STATE' "$MF" || \
+            sed -i 's#</manifest>#    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n</manifest>#' "$MF"
+          grep -n 'usesCleartextTraffic\|networkSecurityConfig' "$MF"
+
+      - name: Configure per-ABI APK splits
+        # Produce one APK per architecture (arm64-v8a, armeabi-v7a, x86_64)
+        # plus a universal build, instead of a single ~160MB universal blob.
+        # The second `android { }` block is cumulative with Capacitor's
+        # template app/build.gradle; output renaming is done post-build in
+        # shell to avoid AGP-version-specific output-name APIs.
+        run: |
+          GRADLE=build/android/android/app/build.gradle
+          grep -q 'splits' "$GRADLE" || printf '%s\n' \
+            '' \
+            '// electerm: split per ABI (injected by CI)' \
+            'android {' \
+            '    splits {' \
+            '        abi {' \
+            '            enable true' \
+            '            reset()' \
+            "            include 'arm64-v8a', 'armeabi-v7a', 'x86_64'" \
+            '            universalApk true' \
+            '        }' \
+            '    }' \
+            '}' >> "$GRADLE"
+          tail -n 15 "$GRADLE"
+
       - name: Build debug APK
         run: cd build/android/android && chmod +x gradlew && ./gradlew assembleDebug
 
@@ -95,12 +134,40 @@ jobs:
             -Pandroid.injected.signing.key.alias=electerm \
             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
 
+      - name: Rename APKs to electerm-android-{arch}-{version}.apk
+        # Version comes from package.json. Each per-ABI APK is renamed to
+        # electerm-android-{arch}-{version}.apk (release) /
+        # electerm-android-{arch}-{version}-debug.apk (debug). The {arch} is
+        # parsed from gradle's per-ABI output filename; falls back to
+        # "universal" for the universal build (or if splits are off).
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          APKROOT=build/android/android/app/build/outputs/apk
+          mkdir -p "$APKROOT/named"
+          for variant in debug release; do
+            dir="$APKROOT/$variant"
+            [ -d "$dir" ] || continue
+            for apk in "$dir"/*.apk; do
+              [ -f "$apk" ] || continue
+              name=$(basename "$apk")
+              arch=$(printf '%s' "$name" | grep -oE 'arm64-v8a|armeabi-v7a|x86_64|universal' | head -1)
+              [ -z "$arch" ] && arch=universal
+              if [ "$variant" = release ]; then
+                out="electerm-android-$arch-$VERSION.apk"
+              else
+                out="electerm-android-$arch-$VERSION-debug.apk"
+              fi
+              cp "$apk" "$APKROOT/named/$out"
+              echo "  $variant/$name -> named/$out"
+            done
+          done
+          echo "=== named APKs ==="
+          ls -la "$APKROOT/named/"
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: electerm-android-apks
-          path: |
-            build/android/android/app/build/outputs/apk/debug/*.apk
-            build/android/android/app/build/outputs/apk/release/*.apk
+          path: build/android/android/app/build/outputs/apk/named/*.apk
           if-no-files-found: error
           retention-days: 30

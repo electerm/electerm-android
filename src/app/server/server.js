@@ -1,4 +1,5 @@
 import express from 'express'
+import pug from 'pug'
 import { wsRoutes } from '../routes/ws.js'
 import { httpRoutes } from '../routes/http.js'
 import { applyExtensions } from '../lib/extensions.js'
@@ -28,6 +29,11 @@ export async function createApp () {
     ':method :url :status :res[content-length] - :response-time ms'
   ))
   app.set('view engine', 'pug')
+  // Register the pug engine explicitly so Express uses the bundled pug
+  // directly instead of lazily `require('pug')` at render time. The lazy
+  // require breaks bundled builds (esbuild can't see the dynamic string
+  // require, so "pug" is missing at runtime -> GET / hangs forever).
+  app.engine('pug', pug.__express)
   app.set(
     'views',
     process.env.VIEW_FOLDER ||
