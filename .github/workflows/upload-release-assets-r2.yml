@@ -1,13 +1,7 @@
-name: upload-release-assets-to-r1
+name: upload-release-assets-to-r2
 on:
   release:
     types: [published]
-  workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Release tag to upload (e.g. v4.15.140)'
-        required: true
-        default: ''
 jobs:
   upload-to-r1:
     runs-on: ubuntu-latest
@@ -51,6 +45,12 @@ jobs:
         run: |
           for file in $(find ./release-assets -type f); do
             rel_path="${file#./release-assets/}"
+            case "$rel_path" in
+              *-debug.apk)
+                echo "Skipping debug APK for R2 upload: $rel_path"
+                continue
+                ;;
+            esac
             aws s3 cp "$file" "s3://${CF_R2_BUCKET}/r1/${rel_path}" \
               --acl public-read \
               --cache-control "max-age=31536000"

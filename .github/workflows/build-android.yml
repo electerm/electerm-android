@@ -232,16 +232,39 @@ jobs:
           # Substitute the version placeholder (heredoc above is literal).
           sed -i "s/\${VERSION}/${VERSION}/g" /tmp/release-notes.md
 
+          # Collect release-only APKs (exclude *-debug.apk).
+          # Debug APKs remain available via the CI artifact upload above
+          # but are NOT published to the GitHub Release.
+          RELEASE_APKS=()
+          for apk in "$APKROOT"/*.apk; do
+            case "$apk" in
+              *-debug.apk)
+                echo "Skipping debug APK from release assets: $(basename "$apk")"
+                continue
+                ;;
+            esac
+            RELEASE_APKS+=("$apk")
+          done
+
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "electerm-android v${VERSION}" \
             --notes-file /tmp/release-notes.md \
             --draft \
-            $APKROOT/*.apk
+            "${RELEASE_APKS[@]}"
 
       - name: Publish the release
+        # IMPORTANT: must use a PAT (PAT_REPO_TOKEN), NOT the default
+        # github.token / GITHUB_TOKEN. Events triggered by GITHUB_TOKEN
+        # (except workflow_dispatch / repository_dispatch) do NOT spawn
+        # new workflow runs — see GitHub docs:
+        # https://docs.github.com/en/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow
+        # The release: [published] event fired here is what wakes up:
+        #   - build-homepage-trigger.yml   (refreshes electerm.org)
+        #   - upload-release-assets-r1.yml (mirrors APKs to R2/r1)
+        # With GITHUB_TOKEN those downstream workflows stay silent.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PAT_REPO_TOKEN }}
           VERSION: ${{ steps.rename.outputs.version }}
         run: |
           TAG="v${VERSION}"
