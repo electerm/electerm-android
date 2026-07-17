@@ -63,30 +63,20 @@ jobs:
 
       - name: Apply icon / splash overlay
         run: |
-          MANIFEST_SRC=build/android/res-overlay/AndroidManifest.xml
-          MANIFEST_DST=build/android/android/app/src/main/AndroidManifest.xml
-
           # AndroidManifest.xml must go at app/src/main/, NOT inside res/.
           # Copy the electerm manifest (with icon, theme, network config) to
           # the correct location, overwriting Capacitor's default.
+          MANIFEST_SRC=build/android/res-overlay/AndroidManifest.xml
+          MANIFEST_DST=build/android/android/app/src/main/AndroidManifest.xml
           if [ -f "$MANIFEST_SRC" ]; then
             cp "$MANIFEST_SRC" "$MANIFEST_DST"
             echo "Overlayed AndroidManifest.xml -> $MANIFEST_DST"
           fi
 
-          # Copy every other entry (drawable, mipmap-*, values, xml) into res/.
-          for entry in build/android/res-overlay/*/; do
-            [ -d "$entry" ] || continue
-            name=$(basename "$entry")
-            cp -r "$entry" "build/android/android/app/src/main/res/$name"
-          done
-          # Also copy any non-directory files in res-overlay (except the manifest)
-          for f in build/android/res-overlay/*; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f")
-            [ "$name" = "AndroidManifest.xml" ] && continue
-            cp "$f" "build/android/android/app/src/main/res/$name"
-          done
+          # Copy all resource dirs (drawable, mipmap-*, values, xml) into res/.
+          # Using overlay/. merges directory contents into the destination
+          # without creating extra nesting levels.
+          cp -r build/android/res-overlay/. build/android/android/app/src/main/res/
 
           # Capacitor's default template ships its own drawable/splash.png and
           # values/ic_launcher_background.xml. These collide with our overlay's
