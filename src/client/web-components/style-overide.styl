@@ -5,19 +5,17 @@
 // Fix custom modal not rendering content on Android WebView.
 //
 // Root cause: the original .custom-modal-wrap is position:fixed WITH
-// overflow:auto. On Android WebView, overflow:auto (or scroll) on a
-// position:fixed element does not render its children — the mask shows
-// but the content card is invisible.
+// overflow:auto. On Android WebView, overflow on a position:fixed element
+// does not render its children — the mask shows but the content card is
+// invisible. Changing overflow to hidden (previous attempt) did not help
+// because even overflow:hidden on position:fixed can trigger the same bug.
 //
-// The previous fix moved overflow:auto to .custom-modal-container and made
-// that position:fixed — but that is the SAME bug (overflow:auto on
-// position:fixed). It only moved the problem one level down.
-//
-// Correct fix:
-//   1. .custom-modal-wrap     → overflow:hidden (no scroll on the fixed layer)
-//   2. .custom-modal-container → height:100% + overflow:auto
-//      (position stays relative from modal.styl; overflow:auto works fine
-//      on position:relative elements in Android WebView)
+// Fix: switch .custom-modal-wrap and .custom-modal-mask from position:fixed
+// to position:absolute. The original overflow:auto / position:relative /
+// min-height:100% from modal.styl all work correctly on position:absolute
+// elements in Android WebView. Since the modal covers the full viewport
+// (top/left/right/bottom:0) and the app body does not scroll, absolute
+// behaves identically to fixed here.
 //
 // Use `body` prefix for specificity: this override is imported early (in
 // basic.js, before the app bundle), while modal.styl is imported by the Modal
@@ -26,9 +24,7 @@
 // `body` covers both modals inside #container AND Modal.info()/Modal.confirm()
 // instances that are appended directly to document.body.
 body .custom-modal-wrap
-  overflow hidden
+  position absolute
 
-body .custom-modal-container
-  height 100%
-  min-height auto
-  overflow auto
+body .custom-modal-mask
+  position absolute
