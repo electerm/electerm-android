@@ -47,7 +47,11 @@ window.pre = {
     'resume',
     'destroy'
   ],
-  osInfo: () => { return window.pre.osInfoData },
+  // Safe defaults for API-dependent data to prevent render crashes
+  // before /api/get-constants response arrives (fixes Android info-modal
+  // showing only background with no content)
+  osInfoData: [],
+  osInfo: () => { return window.pre.osInfoData || [] },
   extIconPath: window.et.extIconPath,
   readClipboard: () => {
     return window.et.clipboard || ''
@@ -97,7 +101,8 @@ window.pre = {
     window.open(url, '_blank')
   },
   runSync,
-  runGlobalAsync
+  runGlobalAsync,
+  versions: {}
 }
 
 const fs = {
