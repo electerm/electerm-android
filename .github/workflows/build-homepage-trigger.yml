@@ -20,4 +20,4 @@ jobs:
         with:
           token: ${{ secrets.PAT_REPO_TOKEN }}
           repository: ${{ matrix.repository }}
-          event-type: electerm-android-release
+          event-type: electerm-release
