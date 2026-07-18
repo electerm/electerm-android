@@ -6,6 +6,7 @@ import defaultSetting from '../common/config-default.js'
 import { userConfigId } from '../common/constants.js'
 import { isDev } from '../common/runtime-constants.js'
 import { dbAction } from './db.js'
+import installSrc from './install-src.js'
 import * as langMap from '@electerm/electerm-locales'
 
 export async function getConfig () {
@@ -34,6 +35,7 @@ export async function init () {
   return {
     config,
     isPortable: true,
+    installSrc,
     langs: Object.keys(langMap).map(id => {
       return {
         id,

@@ -13,6 +13,7 @@ import {
 } from './remote-common.js'
 import { Transfer } from './transfer.js'
 import { FtpTransfer } from './ftp-transfer.js'
+import { Upgrade } from './download-upgrade.js'
 import fs from './fs.js'
 import log from '../common/log.js'
 import fetch from './fetch.js'
@@ -159,7 +160,43 @@ export function initWs (app) {
     // end
   })
 
-  // upgrade todo
+  // upgrade
+  app.ws('/upgrade/:id', (ws, req) => {
+    verifyWs(req)
+    wsDec(ws)
+    const { id } = req.params
+    ws.on('close', () => {
+      const inst = globalState.getUpgradeInst(id)
+      if (inst) {
+        inst.destroy()
+      }
+    })
+    ws.on('message', async (message) => {
+      try {
+        const msg = JSON.parse(message)
+        const { action } = msg
+
+        if (action === 'upgrade-new') {
+          const { id } = msg
+          const opts = Object.assign({}, msg, {
+            ws
+          })
+          const inst = new Upgrade(opts)
+          globalState.setUpgradeInst(id, inst)
+          await inst.init()
+        } else if (action === 'upgrade-func') {
+          const { id, func, args } = msg
+          const inst = globalState.getUpgradeInst(id)
+          if (inst) {
+            inst[func](...args)
+          }
+        }
+      } catch (err) {
+        log.error('upgrade ws error', err)
+      }
+    })
+    // end
+  })
 
   // common functions
   app.ws('/common/s', (ws, req) => {

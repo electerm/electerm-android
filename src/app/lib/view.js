@@ -90,6 +90,7 @@ export async function index (req, res) {
     defaultAIPreset,
     fsFunctions,
     isWebApp: true,
+    disableUpgradeCheck: false,
     extIconPath: cdn + extIconPath,
     cdn,
     sessionLogPath: logDir,

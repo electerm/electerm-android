@@ -2,6 +2,7 @@
 class GlobalState {
   #commonWs = null
   #sessions = {}
+  #upgradeInsts = {}
 
   // Common WebSocket management
   getCommonWs () {
@@ -25,8 +26,24 @@ class GlobalState {
     delete this.#sessions[id]
   }
 
+  // Upgrade instances management
+  getUpgradeInst (id) {
+    return this.#upgradeInsts[id]
+  }
+
+  setUpgradeInst (id, inst) {
+    this.#upgradeInsts[id] = inst
+  }
+
+  removeUpgradeInst (id) {
+    delete this.#upgradeInsts[id]
+  }
+
   get data () {
-    return this.#sessions
+    return {
+      sessions: this.#sessions,
+      upgradeInsts: this.#upgradeInsts
+    }
   }
 }
 
