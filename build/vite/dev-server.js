@@ -47,6 +47,7 @@ const base = {
   fsFunctions,
   packInfo: pack,
   home: os.homedir(),
+  versionFile: 'version-android.html',
   server: h,
   cdn: h,
   isWebApp: true,

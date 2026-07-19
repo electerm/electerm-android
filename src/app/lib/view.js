@@ -91,6 +91,7 @@ export async function index (req, res) {
     fsFunctions,
     isWebApp: true,
     disableUpgradeCheck: false,
+    versionFile: 'version-android.html',
     extIconPath: cdn + extIconPath,
     cdn,
     sessionLogPath: logDir,
