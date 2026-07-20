@@ -50,6 +50,12 @@ jobs:
         run: npm --prefix build/android install
 
       - name: Build web frontend + Node.js backend bundle
+        env:
+          # JWT secret for the on-device electerm server. Baked into the APK
+          # at build time by build/android/build.mjs. Must be set in the
+          # repository GitHub Actions secrets:
+          #   gh secret set SERVER_SECRET --body "$(openssl rand -hex 32)"
+          SERVER_SECRET: ${{ secrets.SERVER_SECRET }}
         run: npm run build:android
 
       - name: Add Android platform (first run only)

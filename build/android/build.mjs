@@ -41,6 +41,20 @@ const VERSION = JSON.parse(
   fs.readFileSync(path.resolve(ROOT, 'package.json'), 'utf8')
 ).version
 
+// JWT secret for the on-device server.
+// In CI (GitHub Actions) this MUST be provided via the SERVER_SECRET Action
+// secret. For local development a fixed fallback is used.
+const LOCAL_DEV_SECRET = 'electerm-android-local-dev-secret'
+const SERVER_SECRET = process.env.SERVER_SECRET || LOCAL_DEV_SECRET
+const IS_CI = !!process.env.CI
+if (IS_CI && SERVER_SECRET === LOCAL_DEV_SECRET) {
+  console.error(
+    '[android] FATAL: SERVER_SECRET is not set. ' +
+    'Add it to the repository GitHub Actions secrets (gh secret set SERVER_SECRET).'
+  )
+  process.exit(1)
+}
+
 // --------------------------------------------------------------------------
 // 1. Frontend
 // --------------------------------------------------------------------------
@@ -359,9 +373,10 @@ process.chdir(__d)
 process.env.NODE_ENV = 'production'
 process.env.HOST = '127.0.0.1'
 process.env.PORT = '5577'
-// Local-only app: a fixed secret is fine. The web UI auto-logs-in because
-// ENABLE_AUTH is not set.
-process.env.SERVER_SECRET = 'electerm-android-local-dev-secret'
+// JWT secret baked in at build time. In CI this comes from the SERVER_SECRET
+// GitHub Action secret; locally it falls back to a fixed dev value.
+// The web UI auto-logs-in because ENABLE_AUTH is not set.
+process.env.SERVER_SECRET = ${JSON.stringify(SERVER_SECRET)}
 // No real pty on Android -> disable the local terminal feature.
 process.env.DISABLE_LOCAL_TERMINAL = '1'
 // Tell the server where the pug views live (cwd is now the node project dir,
