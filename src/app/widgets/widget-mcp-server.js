@@ -1018,9 +1018,8 @@ class ElectermMCPServer {
           version: '2024-11-05',
           apiKey: self.config.apiKey
         }
-        const msg = self.config.apiKey
-          ? `MCP Server is running at ${serverInfo.url} (API key required)`
-          : `MCP Server is running at ${serverInfo.url}`
+        const authNote = self.config.apiKey ? '(API key required)' : '(no auth required)'
+        const msg = `MCP Server is running at ${serverInfo.url} ${authNote}`
         resolve({
           serverInfo,
           msg,
