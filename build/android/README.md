@@ -43,8 +43,9 @@ WebView (frontend)  ── http://127.0.0.1:5577 ──►  Node.js backend (on 
 npm ci                       # root: electerm deps + esbuild + sql.js
 npm --prefix build/android install   # capacitor + @capawesome/capacitor-nodejs
 
-# 2. (optional) regenerate icons/splash from temp/ logos
-npm --prefix build/android run assets
+# 2. (optional) regenerate icons/splash from build/ logos
+#    Sources: build/electerm-logo-square.png (icons) + build/electerm.png (splash)
+npm run logo
 
 # 3. build the web frontend + Node.js backend bundle into build/android/www
 npm run build:android

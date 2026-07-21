@@ -12,6 +12,7 @@
     "clean": "node build/bin/clean",
     "compile": "node build/bin/build",
     "build:android": "node build/android/build.mjs",
+    "logo": "python3 build/bin/gen-logo.py",
     "vite-build": "cross-env NODE_ENV=production vite build --config ./build/vite/conf.js",
     "install": "node build/bin/install",
     "lint": "./node_modules/.bin/standard --verbose",
