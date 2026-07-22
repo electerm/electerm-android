@@ -412,12 +412,11 @@ export default class FileSelectDialog extends Component {
     const showBrowserUpload = !noBrowserTransfer && !isSaveDialog && properties.includes('openFile')
     const showBrowserDownload = !noBrowserTransfer && !isSaveDialog && opts?.content
     return (
-      <div className='fix'>
-        <div className='fleft'>
+      <div className='file-select-dialog-footer'>
+        <div className='file-select-dialog-footer-actions'>
           {this.renderPager()}
           {showBrowserUpload && (
             <Button
-              className='iblock mg1r'
               onClick={this.handleBrowserUpload}
             >
               <UploadOutlined /> {e('uploadFromBrowser')}
@@ -425,24 +424,21 @@ export default class FileSelectDialog extends Component {
           )}
           {showBrowserDownload && (
             <Button
-              className='iblock mg1r'
               onClick={this.handleBrowserDownload}
             >
               <DownloadOutlined /> {e('downloadFromBrowser')}
             </Button>
           )}
         </div>
-        <div className='fright'>
+        <div className='file-select-dialog-footer-submit'>
           <Button
             type='primary'
-            className='iblock mg1r'
             onClick={this.handleClose}
           >
             {s('cancel')}
           </Button>
           <Button
             type='primary'
-            className='iblock'
             onClick={this.handleSubmit}
             disabled={disabled}
           >
