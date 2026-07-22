@@ -479,8 +479,14 @@ function applyResOverlay () {
   //     Defines the same `ic_launcher_background` color as our
   //     colors-electerm.xml → duplicate-resource build error.
   //
-  //   drawable/splash.png
-  //     Same resource name as our drawable/splash.xml → conflict.
+  //   drawable*/splash.png  (density + orientation specific)
+  //     Capacitor ships splash.png in drawable/ AND in every density ×
+  //     orientation bucket: drawable-land-hdpi, drawable-port-xxxhdpi, …
+  //     Our splash is drawable/splash.xml (a layer-list).  Android resource
+  //     resolution prefers a density/orientation-specific splash.png over
+  //     the default-density splash.xml, so on high-density phones (e.g.
+  //     Huawei Mate 40 Pro = xxxhdpi portrait) the Capacitor plug icon was
+  //     shown instead of the electerm splash.  We must remove ALL of them.
   //
   // NOTE: ic_launcher_round.png / ic_launcher_round.xml are NOT removed —
   // the overlay provides electerm round icons (referenced by
@@ -488,14 +494,27 @@ function applyResOverlay () {
   // during the copy above.  Removing them would delete our own icons.
   const conflicts = [
     'drawable-v24/ic_launcher_foreground.xml',
-    'values/ic_launcher_background.xml',
-    'drawable/splash.png'
+    'values/ic_launcher_background.xml'
   ]
   for (const rel of conflicts) {
     const f = path.join(resDir, rel)
     if (fs.existsSync(f)) {
       fs.rmSync(f, { force: true })
       console.log('[android] removed conflicting resource:', rel)
+    }
+  }
+
+  // Dynamically remove every splash.png Capacitor generated across all
+  // drawable* folders (default, density-specific, orientation-specific).
+  // Using a scan instead of a hard-coded list so new density buckets
+  // Capacitor may add in the future are handled automatically.
+  for (const entry of fs.readdirSync(resDir, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith('drawable')) {
+      const splashPng = path.join(resDir, entry.name, 'splash.png')
+      if (fs.existsSync(splashPng)) {
+        fs.rmSync(splashPng, { force: true })
+        console.log('[android] removed conflicting resource:', entry.name + '/splash.png')
+      }
     }
   }
 }

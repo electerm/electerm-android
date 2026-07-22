@@ -98,14 +98,21 @@ jobs:
           #     on API 24+, showing the generic Capacitor logo instead of electerm.
           #   values/ic_launcher_background.xml — same color name as our
           #     colors-electerm.xml → duplicate-resource build error.
-          #   drawable/splash.png — same resource name as our splash.xml.
+          #   drawable*/splash.png — Capacitor ships splash.png in drawable/
+          #     AND in every density × orientation bucket (drawable-land-hdpi,
+          #     drawable-port-xxxhdpi, …).  Our splash is drawable/splash.xml
+          #     (a layer-list).  Android resource resolution prefers a
+          #     density/orientation-specific splash.png over the default-density
+          #     splash.xml, so on high-density phones (e.g. Huawei Mate 40 Pro
+          #     = xxxhdpi portrait) the Capacitor plug icon was shown instead
+          #     of the electerm splash.  Remove ALL of them.
           # NOTE: ic_launcher_round.* are NOT removed — the overlay provides
           # electerm round icons (referenced by android:roundIcon) that
           # overwrite Capacitor's defaults during the copy above.
           RES=build/android/android/app/src/main/res
           rm -f "$RES/drawable-v24/ic_launcher_foreground.xml"
           rm -f "$RES/values/ic_launcher_background.xml"
-          rm -f "$RES/drawable/splash.png"
+          find "$RES" -type f -name 'splash.png' -path '*/drawable*' -delete
 
       - name: Configure per-ABI APK splits
         # Produce one APK per architecture (arm64-v8a, armeabi-v7a, x86_64)
