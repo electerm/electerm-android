@@ -31,8 +31,15 @@ RES = os.path.join(ROOT, "build", "android", "res-overlay")
 # ---------------------------------------------------------------------------
 # Brand colours
 # ---------------------------------------------------------------------------
-BG = (21, 23, 26, 255)        # #15171a — electerm dark slate
+BG = (21, 23, 26, 255)        # #15171a — electerm dark slate (splash background)
 BG_HEX = "#15171a"
+
+# Launcher icon background — matches the solid brown background of
+# build/electerm-logo-square.png (#534741), so the rendered icon
+# reproduces the source square logo instead of showing a black/
+# dark-slate background.
+ICON_BG = (83, 71, 65, 255)   # #534741
+ICON_BG_HEX = "#534741"
 
 # ---------------------------------------------------------------------------
 # Density maps (108dp canvas for adaptive, standard sizes for legacy)
@@ -243,7 +250,7 @@ def gen_legacy():
     for folder, size in LEGACY_DENSITIES.items():
         out = os.path.join(RES, folder)
         ensure_dir(out)
-        bg = make_circular_bg(size, BG)
+        bg = make_circular_bg(size, ICON_BG)
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         canvas.paste(bg, (0, 0), bg)
         logo = get_logo(max_size=int(size * LOGO_FRACTION))
@@ -311,7 +318,7 @@ def gen_values():
             """<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="electerm_bg">""" + BG_HEX + """</color>
-    <color name="ic_launcher_background">""" + BG_HEX + """</color>
+    <color name="ic_launcher_background">""" + ICON_BG_HEX + """</color>
 </resources>
 """
         )

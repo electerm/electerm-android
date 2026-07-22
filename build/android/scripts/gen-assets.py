@@ -16,9 +16,15 @@ RES = os.path.join(ROOT, "build", "android", "res-overlay")
 LOGO = os.path.join(TEMP, "electerm-logo-2048-1.png")   # 2160x2160 RGBA, transparent
 WORDMARK = os.path.join(TEMP, "electerm.png")            # 766x266 RGBA, transparent
 
-# Brand background colour (electerm dark slate)
+# Brand background colour (electerm dark slate) — used for the splash
 BG = (21, 23, 26, 255)          # #15171a
 BG_HEX = "#15171a"
+
+# Launcher icon background — matches the solid brown background of
+# build/electerm-logo-square.png (#534741) so the rendered icon
+# reproduces the source square logo instead of a dark-slate background.
+ICON_BG = (83, 71, 65, 255)     # #534741
+ICON_BG_HEX = "#534741"
 
 # Adaptive icon foreground densities (108dp canvas at each density).
 # The foreground MUST be at the correct density so Android renders it at
@@ -125,7 +131,7 @@ def gen_legacy():
         out = os.path.join(RES, folder)
         ensure_dir(out)
         # Circular brand background with transparent corners
-        bg = make_circular_bg(size, BG)
+        bg = make_circular_bg(size, ICON_BG)
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         canvas.paste(bg, (0, 0), bg)
         # Logo on top, centred within the safe zone
@@ -202,7 +208,7 @@ def gen_values():
             f"""<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="electerm_bg">{BG_HEX}</color>
-    <color name="ic_launcher_background">{BG_HEX}</color>
+    <color name="ic_launcher_background">{ICON_BG_HEX}</color>
 </resources>
 """
         )
