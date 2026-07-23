@@ -79,6 +79,16 @@ export async function index (req, res) {
       'electerm-data-tool --data-path "/path/to/data/nedb-database" export data.json'
     )
   }
+  // All session types the app knows about.
+  const allSessionTypes = [
+    'ssh',
+    'telnet',
+    'web',
+    'rdp',
+    'vnc',
+    'ftp',
+    'spice'
+  ]
   const data = {
     isDev,
     isMac,
@@ -98,7 +108,8 @@ export async function index (req, res) {
     query: req.query,
     server,
     hasNodePty,
-    needMigrate
+    needMigrate,
+    supportSessionTypes: allSessionTypes
   }
   const {
     ENABLE_AUTH
