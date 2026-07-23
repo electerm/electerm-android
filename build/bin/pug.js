@@ -32,14 +32,23 @@ const defaultAIPreset = {
   id: 'ai.electerm.org',
   nameAI: 'ai.electerm.org(default free)'
 }
-
+const supportSessionTypes = [
+  'ssh',
+  'telnet',
+  'web',
+  'rdp',
+  'vnc',
+  'ftp',
+  'spice'
+]
 const data = {
   version: pack.version,
   siteName: pack.name,
   isDev: false,
   cdn: '',
   tokenElecterm: '',
-  defaultAIPreset
+  defaultAIPreset,
+  supportSessionTypes
 }
 const htmlContent = pug.render(pugContent, {
   filename: entryPug,

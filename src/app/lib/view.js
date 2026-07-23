@@ -80,7 +80,7 @@ export async function index (req, res) {
     )
   }
   // All session types the app knows about.
-  const allSessionTypes = [
+  const supportSessionTypes = [
     'ssh',
     'telnet',
     'web',
@@ -109,7 +109,7 @@ export async function index (req, res) {
     server,
     hasNodePty,
     needMigrate,
-    supportSessionTypes: allSessionTypes
+    supportSessionTypes
   }
   const {
     ENABLE_AUTH
