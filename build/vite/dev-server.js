@@ -48,6 +48,7 @@ const base = {
   packInfo: pack,
   home: os.homedir(),
   versionFile: 'version-android.html',
+  downloadUpgradeFromBrowser: true,
   server: h,
   cdn: h,
   isWebApp: true,

@@ -48,6 +48,8 @@ const data = {
   cdn: '',
   tokenElecterm: '',
   defaultAIPreset,
+  downloadUpgradeFromBrowser: true,
+  versionFile: 'version-android.html',
   supportSessionTypes
 }
 const htmlContent = pug.render(pugContent, {

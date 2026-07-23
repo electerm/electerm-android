@@ -102,6 +102,7 @@ export async function index (req, res) {
     isWebApp: true,
     disableUpgradeCheck: false,
     versionFile: 'version-android.html',
+    downloadUpgradeFromBrowser: true,
     extIconPath: cdn + extIconPath,
     cdn,
     sessionLogPath: logDir,
