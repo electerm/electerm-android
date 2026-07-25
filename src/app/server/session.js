@@ -37,7 +37,6 @@ function getType (initOptions) {
 
 export const terminal = async function (initOptions, ws) {
   const type = getType(initOptions)
-  console.log('type', type)
   const { terminal } = sessionModules[type]
   return terminal(initOptions, ws)
 }
