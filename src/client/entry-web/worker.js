@@ -23,6 +23,19 @@ function createWs (
     ws.send(JSON.stringify(msg))
   }
   ws.id = id
+  // Buffer incoming messages until at least one addEventListener is
+  // registered.  Without this, messages that arrive before the client
+  // has called addEventListener (e.g. the "session-interactive" prompt
+  // sent during SSH host-key verification on first connect) are silently
+  // lost, causing the SSH connection to hang indefinitely.
+  ws._messageBuffer = []
+  ws._bufferActive = true
+  ws._bufferHandler = (evt) => {
+    if (ws._bufferActive) {
+      ws._messageBuffer.push(evt.data)
+    }
+  }
+  ws.addEventListener('message', ws._bufferHandler)
   ws.once = (callack, id) => {
     const func = (evt) => {
       const arg = JSON.parse(evt.data)
@@ -139,6 +152,35 @@ async function onMsg (e) {
       }
       ws.listeners.set(id, { type, cb })
       ws.addEventListener(type, cb)
+      // Flush any buffered messages to the newly registered listener so
+      // that messages received before addEventListener was called are
+      // not lost (fixes first-use SSH connection hang).
+      if (type === 'message' && ws._messageBuffer && ws._messageBuffer.length > 0) {
+        for (const bufData of ws._messageBuffer) {
+          send({
+            wsId,
+            id,
+            data: {
+              data: bufData
+            }
+          })
+        }
+      }
+      // Stop buffering once at least one listener is active – future
+      // messages will be delivered directly via the addEventListener
+      // callback.  Keep the buffer array around briefly so that any
+      // subsequent addEventListener calls (e.g. MCP handler) can also
+      // receive the backlog.
+      if (type === 'message' && ws._bufferActive) {
+        ws._bufferActive = false
+        if (ws._bufferHandler) {
+          ws.removeEventListener('message', ws._bufferHandler)
+          ws._bufferHandler = null
+        }
+        setTimeout(() => {
+          ws._messageBuffer = null
+        }, 5000)
+      }
     }
   } else if (action === 'removeEventListener') {
     const ws = self.insts[wsId]
