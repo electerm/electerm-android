@@ -1,6 +1,6 @@
 {
   "name": "electerm-android",
-  "version": "4.15.167",
+  "version": "4.15.171",
   "description": "electerm for Android — a free and open-source ssh/sftp/telnet/RDP/VNC/Spice/ftp client, built on the electerm-web codebase with Capacitor.",
   "main": "src/app/app.js",
   "type": "module",
@@ -49,8 +49,8 @@
   "preferGlobal": true,
   "devDependencies": {
     "@ant-design/icons": "^6.2.5",
-    "@electerm/electerm-react": "^3.15.167",
-    "@electerm/electerm-resource": "2.1.9",
+    "@electerm/electerm-react": "^3.15.171",
+    "@electerm/electerm-resource": "2.1.10",
     "@fontsource/maple-mono": "^5.2.6",
     "@novnc/novnc": "^1.7.0",
     "@types/node": "22.9.3",
@@ -86,7 +86,7 @@
     "vite": "^8.0.15"
   },
   "dependencies": {
-    "@electerm/electerm-locales": "2.2.17",
+    "@electerm/electerm-locales": "2.3.0",
     "@electerm/electerm-themes": "^1.0.1",
     "@electerm/ftp-srv": "1.0.5",
     "@electerm/ssh2": "1.22.0",
@@ -126,7 +126,7 @@
     "socksv5-server": "^1.0.2",
     "ssh-config-loader": "1.1.2",
     "ssh2-scp": "3.2.0",
-    "tar": "^7.5.17",
+    "tar": "^7.5.21",
     "trzsz2": "1.2.0",
     "zmodem2": "1.4.0"
   },
