@@ -1,6 +1,6 @@
 {
   "name": "electerm-android",
-  "version": "4.15.175",
+  "version": "4.15.178",
   "description": "electerm for Android — a free and open-source ssh/sftp/telnet/RDP/VNC/Spice/ftp client, built on the electerm-web codebase with Capacitor.",
   "main": "src/app/app.js",
   "type": "module",
@@ -49,7 +49,7 @@
   "preferGlobal": true,
   "devDependencies": {
     "@ant-design/icons": "^6.2.5",
-    "@electerm/electerm-react": "^3.15.175",
+    "@electerm/electerm-react": "^3.15.178",
     "@electerm/electerm-resource": "2.1.10",
     "@fontsource/maple-mono": "^5.2.6",
     "@novnc/novnc": "^1.7.0",
@@ -86,7 +86,7 @@
     "vite": "^8.0.15"
   },
   "dependencies": {
-    "@electerm/electerm-locales": "2.3.0",
+    "@electerm/electerm-locales": "2.3.1",
     "@electerm/electerm-themes": "^1.0.1",
     "@electerm/ftp-srv": "1.0.5",
     "@electerm/ssh2": "1.22.0",
@@ -96,9 +96,8 @@
     "dayjs": "^1.11.21",
     "diffie-hellman": "^5.0.3",
     "dotenv": "16.3.1",
-    "electerm-sync": "2.0.0",
+    "electerm-sync": "2.0.1",
     "esbuild": "^0.28.1",
-    "sql.js": "^1.12.0",
     "express": "4.22.2",
     "express-jwt": "^8.5.1",
     "express-ws": "5.0.2",
@@ -124,6 +123,7 @@
     "socks": "2.8.9",
     "socks-proxy-agent": "8.0.1",
     "socksv5-server": "^1.0.2",
+    "sql.js": "^1.12.0",
     "ssh-config-loader": "1.1.2",
     "ssh2-scp": "3.2.0",
     "tar": "^7.5.21",
