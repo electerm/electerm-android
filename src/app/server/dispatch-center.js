@@ -205,9 +205,14 @@ export function initWs (app) {
         } else if (action === 'upgrade-func') {
           const { id, func, args } = msg
           const inst = globalState.getUpgradeInst(id)
-          if (inst) {
-            inst[func](...args)
+          if (!inst) {
+            return
           }
+          if (!transferKeys.includes(func) || typeof inst[func] !== 'function') {
+            log.error('invalid upgrade function:', func)
+            return
+          }
+          inst[func](...args)
         }
       } catch (err) {
         log.error('upgrade ws error', err)
