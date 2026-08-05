@@ -29,6 +29,7 @@
 - [electerm theme](https://theme.electerm.org): 创建/分享主题站点，支持实时预览与 AI 创建
 - [electerm deb repo](https://repos.electerm.org/deb): Debian repo of electerm
 - [electerm rpm repo](https://repos.electerm.org/rpm): RPM repo of electerm
+- [electerm Harmony](https://github.com/electerm/electerm-harmony): electerm for HarmonyOS (available on [Huawei AppGallery](https://appgallery.huawei.com/app/detail?id=org.electerm.electerm))
 
 ## 工作原理
 

@@ -30,6 +30,7 @@ Open-sourced ssh/sftp/telnet/RDP/VNC/Spice/ftp client for Android, built on top 
 - [electerm theme](https://theme.electerm.org): Create/share theme site with live preview and AI creation
 - [electerm deb repo](https://repos.electerm.org/deb): Debian repo of electerm
 - [electerm rpm repo](https://repos.electerm.org/rpm): RPM repo of electerm
+- [electerm Harmony](https://github.com/electerm/electerm-harmony): electerm for HarmonyOS (available on [Huawei AppGallery](https://appgallery.huawei.com/app/detail?id=org.electerm.electerm))
 
 ## How it works
 
