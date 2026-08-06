@@ -19,10 +19,8 @@
     "fix": "./node_modules/.bin/standard --fix",
     "lock": "npm i --package-lock-only",
     "r": "./build/bin/release",
-    "test": "npm run test1 && npm run test2",
-    "test1": "./node_modules/.bin/playwright test test/e2e/00*.js --config test/playwright.conf.js",
-    "test2": "./node_modules/.bin/playwright test test/e2e/01*.js --config test/playwright.conf.js",
-    "test3": "./node_modules/.bin/playwright test test/unit/*.js"
+    "test": "npm run test:integration",
+    "test:integration": "node --test test/integration/mcp.spec.js"
   },
   "license": "MIT",
   "langugeRepo": "https://github.com/electerm/electerm-locales",

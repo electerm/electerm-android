@@ -15,8 +15,7 @@ import globalState from '../server/global-state.js'
 import {
   sshBookmarkSchema,
   telnetBookmarkSchema,
-  serialBookmarkSchema,
-  localBookmarkSchema
+  serialBookmarkSchema
 } from '../common/bookmark-zod-schemas.js'
 
 const widgetInfo = {
@@ -384,18 +383,6 @@ class ElectermMCPServer {
     )
 
     server.registerTool(
-      'open_electerm_local_terminal',
-      {
-        description: 'Open a new electerm local terminal tab',
-        inputSchema: z.object({})
-      },
-      async () => {
-        const result = await self.sendToRenderer('tool-call', { toolName: 'open_local_terminal', args: {} })
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-      }
-    )
-
-    server.registerTool(
       'send_electerm_terminal_command',
       {
         description: 'Send a command to the active electerm terminal. For non-interactive commands, prefer execute_electerm_command — it returns structured stdout/stderr/exitCode in one call instead of requiring send + wait + read.',
@@ -634,21 +621,6 @@ class ElectermMCPServer {
       }
     )
 
-    server.registerTool(
-      'open_electerm_tab_local',
-      {
-        description: 'Open a new Local terminal tab directly with connection parameters (no bookmark created)',
-        inputSchema: localBookmarkSchema
-      },
-      async (args) => {
-        const result = await self.sendToRenderer('tool-call', {
-          toolName: 'open_tab',
-          args: { ...args, type: 'local' }
-        })
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-      }
-    )
-
     // ==================== Bookmark APIs ====================
     if (this.config.enableBookmarks) {
       server.registerTool(
@@ -722,21 +694,6 @@ class ElectermMCPServer {
           const result = await self.sendToRenderer('tool-call', {
             toolName: 'add_bookmark',
             args: { ...args, type: 'serial' }
-          })
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
-        }
-      )
-
-      server.registerTool(
-        'add_electerm_bookmark_local',
-        {
-          description: 'Add a new Local terminal bookmark to electerm',
-          inputSchema: localBookmarkSchema
-        },
-        async (args) => {
-          const result = await self.sendToRenderer('tool-call', {
-            toolName: 'add_bookmark',
-            args: { ...args, type: 'local' }
           })
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
         }
@@ -1009,8 +966,10 @@ class ElectermMCPServer {
     const commonWs = globalState.getCommonWs()
     commonWs.on('message', this.ipcHandler)
 
-    // Create MCP task manager (SEP-2663) when the tasks extension is enabled
-    if (this.config.enableTasks) {
+    // Create MCP task manager (SEP-2663) when the tasks extension is enabled.
+    // `enableTasks` defaults to true, so treat anything other than an
+    // explicit `false` (undefined/null from a stale pre-5.0.6 config) as on.
+    if (this.config.enableTasks !== false) {
       this.taskManager = new TaskManager({
         ttl: this.config.taskTtlMs > 0 ? this.config.taskTtlMs : 3600000
       })
@@ -1018,6 +977,10 @@ class ElectermMCPServer {
       this.taskManager.onCancel = (task) => this.cancelTaskRemote(task)
       this.taskManager.onSweep = (task) => this.sweepTaskRemote(task)
     }
+    console.log(
+      `[mcp-widget] tasks extension: ${this.taskManager ? 'enabled' : 'disabled'} ` +
+      `(config.enableTasks = ${JSON.stringify(this.config.enableTasks)})`
+    )
 
     // Create MCP server
     this.mcpServer = new McpServer({
