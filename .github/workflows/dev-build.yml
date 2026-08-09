@@ -1,6 +1,6 @@
 name: Dev Build Android APK
 
-# Lightweight dev build: builds debug + release APKs, uploads them as
+# Lightweight dev build:  builds debug + release APKs, uploads them as
 # GitHub Actions artifacts, and optionally mirrors release APKs to Cloudflare
 # R2 when the commit message contains [r2].
 #
