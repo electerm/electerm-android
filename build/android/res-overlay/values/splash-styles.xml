@@ -4,5 +4,15 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:windowBackground">@drawable/splash</item>
+        <!-- Resize the window when the soft keyboard appears so input fields
+             (footer batch input, modals) stay visible instead of being
+             covered by the keyboard. -->
+        <item name="android:windowSoftInputMode">adjustResize</item>
+        <!-- Match the electerm dark background so the status bar / nav bar
+             areas (which are now excluded from WebView content via
+             setDecorFitsSystemWindows(true) in MainActivity) blend in with
+             the app instead of showing a jarring white strip. -->
+        <item name="android:statusBarColor">@color/electerm_bg</item>
+        <item name="android:navigationBarColor">@color/electerm_bg</item>
     </style>
 </resources>

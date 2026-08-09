@@ -456,9 +456,24 @@ function applyResOverlay () {
     console.log('[android] wrote', manifestDest)
   }
 
+  // Custom MainActivity.java: overrides Capacitor's BridgeActivity to opt out
+  // of edge-to-edge (WindowCompat.setDecorFitsSystemWindows(true)). Without
+  // this, on Android 15+ (Pixel 9, etc.) the WebView content extends under the
+  // system status bar and the tab bar becomes unclickable. The Java source
+  // lives under res-overlay/java/ and must be copied to the Gradle source tree
+  // (app/src/main/java/), NOT to res/.
+  const javaSrcDir = path.resolve(overlayDir, 'java')
+  if (fs.existsSync(javaSrcDir)) {
+    const javaDestDir = path.resolve(mainDir, 'java')
+    copyDir(javaSrcDir, javaDestDir)
+    console.log('[android] wrote MainActivity.java →', javaDestDir)
+  }
+
   // Copy every *other* entry (drawable, mipmap-*, values, xml, …) into res/.
+  // Skip 'AndroidManifest.xml' (handled above) and 'java' (Java sources,
+  // handled above — must NOT go into res/).
   for (const entry of fs.readdirSync(overlayDir, { withFileTypes: true })) {
-    if (entry.name === 'AndroidManifest.xml') continue
+    if (entry.name === 'AndroidManifest.xml' || entry.name === 'java') continue
     const s = path.join(overlayDir, entry.name)
     const d = path.join(resDir, entry.name)
     if (entry.isDirectory()) copyDir(s, d)

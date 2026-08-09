@@ -87,6 +87,22 @@ Then add an SSH/SFTP/Telnet/FTP/RDP/VNC/Spice connection and try it.
 - The device must allow "Install from unknown sources" for sideloaded APKs.
 - Data is stored inside the app's sandbox (`data/sqlite/...` under the Node project).
 
+## res-overlay
+
+`res-overlay/` holds files that overwrite Capacitor's defaults after `cap sync`:
+
+| File | Purpose |
+|------|---------|
+| `AndroidManifest.xml` | electerm app icon, splash theme, cleartext traffic, network security config |
+| `values/splash-styles.xml` | App theme — adds `windowSoftInputMode=adjustResize`, `statusBarColor`, `navigationBarColor` |
+| `values/colors-electerm.xml` | electerm background color (`#15171a`) used by the theme |
+| `java/org/electerm/electerm/MainActivity.java` | Custom `MainActivity` that opts out of edge-to-edge by calling `setDecorFitsSystemWindows(true)` — fixes the status bar covering the tab bar on Android 15+ (Pixel 9, etc.) |
+| `drawable/`, `mipmap-*/` | Launcher icons |
+| `xml/network_security_config.xml` | Permits cleartext to `127.0.0.1` |
+
+`build.mjs --overlay-only` (and the CI "Apply icon / splash overlay" step) copies
+these into the native project at the correct locations.
+
 ## CI
 
 `.github/workflows/build-android.yml` builds debug **and** release (ephemerally
