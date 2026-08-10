@@ -85,7 +85,12 @@ const charKeys = {
 
 // Button layout. Each entry: { id, label, type }
 // type: 'seq' = terminal sequence, 'char' = insert character,
-//       'toggle' = modifier toggle, 'done' = dismiss keyboard
+//       'toggle' = modifier toggle, 'done' = dismiss keyboard,
+//       'hide' = collapse the bar (keep the keyboard)
+//
+// NOTE: the 'hide' button is intentionally NOT in this list. It is rendered
+// outside the scroll container (see render()) so it stays pinned to the left
+// even when the user scrolls the key row all the way to the end.
 const buttonLayout = [
   { id: 'esc', label: 'ESC', type: 'seq' },
   { id: 'tab', label: 'TAB', type: 'seq' },
@@ -124,6 +129,7 @@ export default class KeyboardAccessoryBar extends Component {
     super(props)
     this.state = {
       visible: false,
+      hidden: false,
       isTerminal: false,
       ctrlActive: false,
       altActive: false
@@ -137,6 +143,11 @@ export default class KeyboardAccessoryBar extends Component {
     // Use focusin/focusout (bubbling) to detect when any input is focused.
     document.addEventListener('focusin', this.handleFocusIn, true)
     document.addEventListener('focusout', this.handleFocusOut, true)
+    this._syncBarHeight()
+  }
+
+  componentDidUpdate () {
+    this._syncBarHeight()
   }
 
   componentWillUnmount () {
@@ -144,6 +155,20 @@ export default class KeyboardAccessoryBar extends Component {
     document.removeEventListener('focusout', this.handleFocusOut, true)
     clearTimeout(this._focusTimer)
     this._restoreSendData()
+    // Give the reserved space back.
+    document.documentElement.style.setProperty('--kb-bar-h', '0px')
+  }
+
+  /**
+   * Publish the bar's height as --kb-bar-h on :root so the page can reserve
+   * that much space at the bottom and the bar never covers content (see the
+   * matching rules in keyboard-accessory-bar.styl). 0 when hidden/collapsed.
+   */
+  _syncBarHeight = () => {
+    const h = (this.state.visible && !this.state.hidden && this._barEl)
+      ? this._barEl.offsetHeight
+      : 0
+    document.documentElement.style.setProperty('--kb-bar-h', h + 'px')
   }
 
   handleFocusIn = (e) => {
@@ -159,7 +184,7 @@ export default class KeyboardAccessoryBar extends Component {
     // Small delay so focusout→focusin rapid switching (e.g. tapping a bar
     // button) doesn't cause a hide→show flicker.
     this._focusTimer = setTimeout(() => {
-      this.setState({ visible: true, isTerminal })
+      this.setState({ visible: true, hidden: false, isTerminal })
     }, 50)
   }
 
@@ -173,6 +198,7 @@ export default class KeyboardAccessoryBar extends Component {
       if (!isInput) {
         this.setState({
           visible: false,
+          hidden: false,
           ctrlActive: false,
           altActive: false
         })
@@ -318,11 +344,18 @@ export default class KeyboardAccessoryBar extends Component {
     const { isTerminal } = this.state
 
     switch (btn.type) {
+      case 'hide': {
+        // Collapse the bar but keep the keyboard open so the user can still
+        // type. A floating button (rendered in render()) brings it back.
+        this.setState({ hidden: true, ctrlActive: false, altActive: false })
+        this._restoreSendData()
+        break
+      }
       case 'done': {
         // Dismiss the keyboard by blurring the focused element.
         const el = document.activeElement
         if (el && el.blur) el.blur()
-        this.setState({ visible: false, ctrlActive: false, altActive: false })
+        this.setState({ visible: false, hidden: false, ctrlActive: false, altActive: false })
         this._restoreSendData()
         break
       }
@@ -382,6 +415,7 @@ export default class KeyboardAccessoryBar extends Component {
       const active = btn.id === 'ctrl' ? ctrlActive : altActive
       cls += active ? ' kb-key-active' : ''
     }
+    if (btn.id === 'hide') cls += ' kb-key-hide'
     if (btn.id === 'done') cls += ' kb-key-done'
     if (btn.id === 'backspace') cls += ' kb-key-wide'
     if (btn.id === 'enter') cls += ' kb-key-enter'
@@ -401,12 +435,46 @@ export default class KeyboardAccessoryBar extends Component {
   }
 
   render () {
-    if (!this.state.visible) return null
+    const { visible, hidden } = this.state
+    if (!visible) return null
+    // Collapsed: render just a small floating button to bring the bar back.
+    // The keyboard stays open; only the bar is hidden.
+    if (hidden) {
+      return (
+        <button
+          className='kb-accessory-show'
+          aria-label='Show keyboard toolbar'
+          // Keep focus on the terminal/input underneath.
+          onMouseDown={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.preventDefault()}
+          onClick={() => this.setState({ hidden: false })}
+          type='button'
+        >
+          ▴
+        </button>
+      )
+    }
     const { isTerminal } = this.state
     return (
-      <div className='kb-accessory-bar'>
-        <div className='kb-accessory-scroll'>
-          {buttonLayout.map(btn => this.renderButton(btn))}
+      <div
+        className='kb-accessory-bar'
+        ref={(el) => { this._barEl = el }}
+      >
+        <div className='kb-accessory-row'>
+          {/* Pinned hide button — always visible at the left, never scrolls. */}
+          <button
+            className='kb-key kb-key-hide'
+            aria-label='Hide keyboard toolbar'
+            onMouseDown={(e) => e.preventDefault()}
+            onTouchStart={(e) => e.preventDefault()}
+            onClick={(e) => this.handleButton({ id: 'hide', type: 'hide' }, e)}
+            type='button'
+          >
+            ▾
+          </button>
+          <div className='kb-accessory-scroll'>
+            {buttonLayout.map(btn => this.renderButton(btn))}
+          </div>
         </div>
         {!isTerminal && (
           <div className='kb-accessory-hint'>

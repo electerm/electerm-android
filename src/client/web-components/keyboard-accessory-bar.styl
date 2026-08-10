@@ -18,11 +18,19 @@
   -webkit-user-select none
   -webkit-tap-highlight-color transparent
 
+// Row that holds the pinned hide button + the horizontally scrolling keys.
+.kb-accessory-row
+  display flex
+  align-items center
+  gap 6px
+  padding 4px 6px
+
 .kb-accessory-scroll
+  flex 1 1 auto
+  min-width 0
   display flex
   align-items center
   gap 2px
-  padding 4px 6px
   overflow-x auto
   overflow-y hidden
   scrollbar-width none
@@ -69,6 +77,40 @@
   &:active
     opacity 0.7
 
+// Hide (collapse) button — pinned to the left of the bar, outside the scroll
+// area, so it is always reachable even when the key row is scrolled to the end.
+.kb-key-hide
+  flex-shrink 0
+  font-size 15px
+  opacity 0.8
+  &:active
+    opacity 0.55
+
+// Floating "bring the bar back" button shown while the bar is collapsed.
+.kb-accessory-show
+  position fixed
+  right 10px
+  bottom 10px
+  z-index 9998
+  width 36px
+  height 36px
+  border-radius 50%
+  border 1px solid var(--border-color, #3a3d42)
+  background var(--primary, #4a90d9)
+  color #fff
+  font-size 16px
+  line-height 1
+  display flex
+  align-items center
+  justify-content center
+  box-shadow 0 2px 8px rgba(0, 0, 0, 0.3)
+  cursor pointer
+  user-select none
+  -webkit-user-select none
+  -webkit-tap-highlight-color transparent
+  &:active
+    opacity 0.7
+
 .kb-key-wide
   min-width 48px
 
@@ -80,3 +122,30 @@
   font-size 10px
   color var(--text-light, #8b909f)
   text-align center
+
+// ---------------------------------------------------------------------------
+// Reserve space so the accessory bar never covers page content.
+//
+// The bar publishes its live height as --kb-bar-h (in px) on :root via JS
+// (KeyboardAccessoryBar._syncBarHeight). It is set to the bar's pixel height
+// while the bar is visible & expanded, and 0 otherwise — so these rules are
+// no-ops unless the bar is actually on screen.
+:root
+  --kb-bar-h 0px
+
+.is-mobile
+  // Lift the footer (which carries the batch input) so its own input is not
+  // hidden behind the bar. .main-footer is position:absolute; bottom:0.
+  .main-footer
+    bottom var(--kb-bar-h, 0px)
+  // Shrink the terminal area by the bar height so the last terminal rows are
+  // not covered. border-box keeps .term-wrap inside its layout cell; xterm's
+  // FitAddon re-measures the (now shorter) .xterm and drops rows accordingly.
+  .term-wrap
+    box-sizing border-box
+    padding-bottom var(--kb-bar-h, 0px)
+  // Fullscreen terminal: term-wrap-1 is the inset box (bottom:10px).
+  &.fullscreen
+    .session-wrap.session-current
+      .term-wrap-1
+        bottom calc(10px + var(--kb-bar-h, 0px)) !important
