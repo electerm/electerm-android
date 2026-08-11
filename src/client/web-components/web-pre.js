@@ -38,6 +38,35 @@ function decodeBase64String (base64String) {
 
 window.log = window.console
 
+// Fallback clipboard copy using execCommand, for Android WebView where
+// navigator.clipboard.writeText() may fail silently (non-secure http
+// scheme, missing user-gesture context from antd Dropdown menu clicks,
+// or Promise rejection that the try/catch does not catch).
+// execCommand('copy') uses the WebView's internal clipboard mechanism
+// which is connected to the Android system ClipboardManager.
+function execCommandCopy (str) {
+  const textarea = document.createElement('textarea')
+  textarea.value = str
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  // For iOS Safari compatibility
+  textarea.setSelectionRange(0, str.length)
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch (e) {
+    // ignore
+  }
+  document.body.removeChild(textarea)
+  return ok
+}
+
 window.pre = {
   resolve: (...args) => {
     return path.resolve(...args.map(d => d || ''))
@@ -60,24 +89,45 @@ window.pre = {
   writeClipboard: str => {
     window.et.clipboard = str
     if (!navigator.clipboard) {
-      message.error('Clipboard API not available')
+      // navigator.clipboard not available — use execCommand fallback
+      // (works in Android WebView via the system ClipboardManager)
+      if (!execCommandCopy(str)) {
+        message.error('Clipboard API not available')
+      }
       return
     }
     try {
-      return navigator.clipboard.writeText(str)
+      const promise = navigator.clipboard.writeText(str)
+      // Handle Promise rejection — the try/catch above only catches
+      // synchronous errors, not async rejections. On Android WebView,
+      // writeText() may reject because the page is served over http://
+      // (not a secure context) or the user-gesture requirement is not
+      // satisfied from a Dropdown menu click.
+      if (promise && typeof promise.catch === 'function') {
+        promise.catch(() => {
+          execCommandCopy(str)
+        })
+      }
+      return promise
     } catch (err) {
-      message.error('Failed to copy text: ' + err)
+      // Synchronous error — try execCommand fallback
+      if (!execCommandCopy(str)) {
+        message.error('Failed to copy text: ' + err)
+      }
     }
   },
   readClipboardSync: function readClipboard () {
     if (!navigator.clipboard) {
-      message.error('Clipboard API not available')
-      return ''
+      // Fallback: return in-memory clipboard value (may be stale if the
+      // user copied via the WebView's native text selection, but there
+      // is no synchronous clipboard read API available in this case).
+      return window.et.clipboard || ''
     }
     try {
       return navigator.clipboard.readText()
     } catch (err) {
-      message.error('Failed to read clipboard: ' + err.message)
+      // Fallback: return in-memory clipboard value
+      return window.et.clipboard || ''
     }
   },
 
