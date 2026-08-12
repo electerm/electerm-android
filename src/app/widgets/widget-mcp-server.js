@@ -18,6 +18,27 @@ import {
   serialBookmarkSchema
 } from '../common/bookmark-zod-schemas.js'
 
+// Dangerous tab props that allow arbitrary command execution.
+// Must be stripped from any MCP tool args before forwarding to the renderer.
+// Mirrors src/client/store/tab.js dangerousTabProps.
+const dangerousTabProps = [
+  'execLinux',
+  'execMac',
+  'execWindows',
+  'execWindowsArgs',
+  'execMacArgs',
+  'execLinuxArgs',
+  'setEnv',
+  'runScripts',
+  'interactiveValues'
+]
+
+function stripDangerousTabProps (obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([key]) => !dangerousTabProps.includes(key))
+  )
+}
+
 const widgetInfo = {
   name: 'MCP Server',
   description: 'Expose electerm APIs via Model Context Protocol (MCP) for AI assistants and external tools.',
@@ -585,7 +606,7 @@ class ElectermMCPServer {
       async (args) => {
         const result = await self.sendToRenderer('tool-call', {
           toolName: 'open_tab',
-          args: { ...args, type: 'ssh' }
+          args: { ...stripDangerousTabProps(args), type: 'ssh' }
         })
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
       }
@@ -600,7 +621,7 @@ class ElectermMCPServer {
       async (args) => {
         const result = await self.sendToRenderer('tool-call', {
           toolName: 'open_tab',
-          args: { ...args, type: 'telnet' }
+          args: { ...stripDangerousTabProps(args), type: 'telnet' }
         })
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
       }
@@ -615,7 +636,7 @@ class ElectermMCPServer {
       async (args) => {
         const result = await self.sendToRenderer('tool-call', {
           toolName: 'open_tab',
-          args: { ...args, type: 'serial' }
+          args: { ...stripDangerousTabProps(args), type: 'serial' }
         })
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
       }
