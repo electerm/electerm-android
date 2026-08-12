@@ -3,14 +3,12 @@ import Login from '../simple-auth/web-login'
 import store from './web-store'
 import FileSelectDialog from '../file-select-dialog/file-select-dialog'
 import Logout from '../simple-auth/logout'
-import KeyboardAccessoryBar from './keyboard-accessory-bar'
 export default function MainEntry () {
   return (
     <ErrorBoundary>
       <Login store={store} />
       <FileSelectDialog store={store} />
       <Logout store={store} />
-      <KeyboardAccessoryBar />
     </ErrorBoundary>
   )
 }
