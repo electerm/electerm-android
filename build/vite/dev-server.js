@@ -129,6 +129,7 @@ async function createServer () {
     ...conf,
     server: {
       middlewareMode: true,
+      allowedHosts: ['service.html5beta.com'],
       hmr: {
         overlay: true,
         port: env.DEV_HMR_PORT || 23589
