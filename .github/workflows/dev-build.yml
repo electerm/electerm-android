@@ -130,8 +130,33 @@ jobs:
             '}' >> "$GRADLE"
           tail -n 15 "$GRADLE"
 
+      - name: Cache Gradle distribution
+        # The Gradle wrapper downloads gradle-8.14.3-all.zip (~150 MB) from
+        # services.gradle.org on every run. If that download fails with a
+        # transient network error (e.g. "Unexpected end of file from server"),
+        # the entire build fails. Caching the extracted distribution avoids
+        # the download entirely on subsequent runs.
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper/dists
+          key: gradle-wrapper-${{ runner.os }}-${{ hashFiles('build/android/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-wrapper-${{ runner.os }}-
+
       - name: Build debug APK
-        run: cd build/android/android && chmod +x gradlew && ./gradlew assembleDebug
+        # Retry up to 3 times to handle transient network errors when
+        # downloading the Gradle distribution for the first time (i.e. cache miss).
+        run: |
+          cd build/android/android && chmod +x gradlew
+          for i in 1 2 3; do
+            ./gradlew assembleDebug && break
+            if [ "$i" -eq 3 ]; then
+              echo "::error::Build failed after 3 attempts"
+              exit 1
+            fi
+            echo "Attempt $i failed, retrying in 15s…"
+            sleep 15
+          done
 
       - name: Build release APK (signed with persistent keystore)
         env:
