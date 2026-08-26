@@ -30,6 +30,7 @@
 - [electerm deb repo](https://repos.electerm.org/deb): Debian repo of electerm
 - [electerm rpm repo](https://repos.electerm.org/rpm): RPM repo of electerm
 - [electerm Harmony](https://github.com/electerm/electerm-harmony): electerm for HarmonyOS (available on [Huawei AppGallery](https://appgallery.huawei.com/app/detail?id=org.electerm.electerm))
+- [electerm iOS](https://github.com/electerm/electerm-ios): iOS 端 electerm（可在 [Apple App Store](https://apps.apple.com/cn/app/electerm/id6792971552) 获取）
 
 ## 工作原理
 

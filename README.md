@@ -31,6 +31,7 @@ Open-sourced ssh/sftp/telnet/RDP/VNC/Spice/ftp client for Android, built on top 
 - [electerm deb repo](https://repos.electerm.org/deb): Debian repo of electerm
 - [electerm rpm repo](https://repos.electerm.org/rpm): RPM repo of electerm
 - [electerm Harmony](https://github.com/electerm/electerm-harmony): electerm for HarmonyOS (available on [Huawei AppGallery](https://appgallery.huawei.com/app/detail?id=org.electerm.electerm))
+- [electerm iOS](https://github.com/electerm/electerm-ios): electerm for iOS (available on [Apple App Store](https://apps.apple.com/cn/app/electerm/id6792971552))
 
 ## How it works
 
