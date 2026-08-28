@@ -70,6 +70,22 @@ export function runSync (ws, msg) {
     args = []
   } = msg
   // console.log('runSync', func, args)
+  // Security: only dispatch to functions that are explicitly wired into
+  // the globs object as own properties. Checking hasOwnProperty (instead of
+  // a hand-maintained name list) means the allowlist can never drift from the
+  // real exports, and it blocks prototype-chain pivots like 'constructor',
+  // 'toString', '__proto__', 'hasOwnProperty' (CWE-863 / CWE-749).
+  if (!Object.prototype.hasOwnProperty.call(globs, func) || typeof globs[func] !== 'function') {
+    log.error('[security] blocked runSync call: ' + func)
+    ws.s({
+      error: {
+        message: 'invalid function: ' + func,
+        stack: ''
+      },
+      id
+    })
+    return
+  }
   globs[func](...args)
     .then(data => {
       ws.s({
