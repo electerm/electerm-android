@@ -5,24 +5,24 @@
  */
 
 import { packInfo } from '../common/runtime-constants.js'
-import { resolve, dirname } from 'path'
-import fs from 'fs'
 import log from '../common/log.js'
 import compare from '../common/version-compare.js'
 import { dbAction } from '../lib/db.js'
 import _ from 'lodash'
 import initData from './init-nedb.js'
 import { updateDBVersion } from './version-upgrade.js'
-import { fileURLToPath } from 'url'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
 
 const { version: packVersion } = packInfo
 const emptyVersion = '0.0.0'
 const versionQuery = {
   _id: 'version'
 }
+
+// Static registry of versioned upgrade scripts.
+// Add entries here as new versions require DB migrations, e.g.:
+//   { version: '4.1.0', run: () => import('./v4.1.0.js').then(d => d.default) }
+const versionUpgradeScripts = [
+]
 
 async function getDBVersion () {
   const version = await dbAction('data', 'findOne', versionQuery)
@@ -41,13 +41,9 @@ async function getDBVersion () {
  */
 async function getUpgradeVersionList () {
   const version = await getDBVersion()
-  const list = fs.readdirSync(__dirname)
-  return list.filter(f => {
-    const vv = f.replace('.js', '').replace('v', '')
-    return /^v\d/.test(f) && compare(vv, version) > 0 && compare(vv, packVersion) <= 0
-  }).sort((a, b) => {
-    return compare(a, b)
-  })
+  return versionUpgradeScripts.filter(({ version: vv }) => {
+    return compare(vv, version) > 0 && compare(vv, packVersion) <= 0
+  }).sort((a, b) => compare(a.version, b.version))
 }
 
 async function versionShouldUpgrade () {
@@ -82,10 +78,9 @@ export async function checkDbUpgrade () {
 export async function doUpgrade () {
   const list = await getUpgradeVersionList()
   log.info('Upgrading...')
-  for (const v of list) {
-    const p = resolve(__dirname, v)
-    const run = import(p).then(d => d.default)
-    await run()
+  for (const { run } of list) {
+    const runFn = await run()
+    await runFn()
   }
   log.info('Upgrade end')
 }

@@ -1,78 +1,31 @@
 // load-widget.js
 
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
-// import log from '../common/log.js'
+// Static imports so bundlers can include all widget modules in a single output file
+import * as widgetBatchOp from './widget-batch-op.js'
+import * as widgetLocalFileServer from './widget-local-file-server.js'
+import * as widgetLocalFtpServer from './widget-local-ftp-server.js'
+import * as widgetMcpServer from './widget-mcp-server.js'
+import * as widgetRename from './widget-rename.js'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const widgetIdPattern = /^[a-z0-9-]+$/
-
-function resolveWidgetPath (widgetId, widgetDirectory = __dirname) {
-  if (typeof widgetId !== 'string' || !widgetIdPattern.test(widgetId)) {
-    throw new Error(`Invalid widget ID: ${widgetId}`)
-  }
-
-  const widgetPath = path.resolve(widgetDirectory, `widget-${widgetId}.js`)
-  const relativePath = path.relative(widgetDirectory, widgetPath)
-
-  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-    throw new Error(`Invalid widget ID: ${widgetId}`)
-  }
-
-  return widgetPath
+// Registry maps widget ID → module. Add new widgets here.
+const widgetRegistry = {
+  'batch-op': widgetBatchOp,
+  'local-file-server': widgetLocalFileServer,
+  'local-ftp-server': widgetLocalFtpServer,
+  'mcp-server': widgetMcpServer,
+  rename: widgetRename
 }
+
+const widgetIdPattern = /^[a-z0-9-]+$/
 
 // Store running widget instances
 const runningInstances = new Map()
 
-async function listWidgetsFromFolder (widgetDirectory = __dirname) {
-  const widgetFiles = fs.readdirSync(widgetDirectory).filter(file => file.startsWith('widget-') && file.endsWith('.js'))
-  const res = []
-  for (const file of widgetFiles) {
-    try {
-      const widgetPath = path.join(widgetDirectory, file)
-      const widgetModule = await import(`file://${widgetPath}`)
-      res.push({
-        id: file.slice(7, -3),
-        info: widgetModule.widgetInfo
-      })
-    } catch (error) {
-      console.error(`Error loading widget from file ${file}:`, error)
-      continue
-    }
-  }
-  return res
-}
-
-async function listWidgets () {
-  const widgets1 = await listWidgetsFromFolder()
-  return widgets1
-  // if (process.versions.electron === undefined) {
-  //   return widgets1
-  // }
-  // const {
-  //   appPath
-  // } = require('../common/app-props')
-  // const userWidgetsDir = path.resolve(
-  //   appPath, 'widgets'
-  // )
-  // // Ensure user widgets directory exists when app starts
-  // try {
-  //   if (!fs.existsSync(userWidgetsDir)) {
-  //     fs.mkdirSync(userWidgetsDir, { recursive: true })
-  //   }
-  // } catch (err) {
-  //   log.error(`Failed to create user widgets directory ${userWidgetsDir}:`, err)
-  // }
-  // const widgets2 = listWidgetsFromFolder(
-  //   userWidgetsDir
-  // )
-  // return [
-  //   ...widgets1,
-  //   ...widgets2
-  // ]
+function listWidgets () {
+  return Object.entries(widgetRegistry).map(([id, mod]) => ({
+    id,
+    info: mod.widgetInfo
+  }))
 }
 
 function hasRunningInstance (widgetId) {
@@ -85,8 +38,13 @@ function hasRunningInstance (widgetId) {
 }
 
 async function runWidget (widgetId, config) {
-  const widgetPath = resolveWidgetPath(widgetId)
-  const widget = await import(`file://${widgetPath}`)
+  if (typeof widgetId !== 'string' || !widgetIdPattern.test(widgetId)) {
+    throw new Error(`Invalid widget ID: ${widgetId}`)
+  }
+  const widget = widgetRegistry[widgetId]
+  if (!widget) {
+    throw new Error(`Widget not found: ${widgetId}`)
+  }
 
   const { type, singleInstance } = widget.widgetInfo
   if (type !== 'instance') {
