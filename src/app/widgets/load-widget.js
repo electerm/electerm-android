@@ -21,7 +21,7 @@ const widgetIdPattern = /^[a-z0-9-]+$/
 // Store running widget instances
 const runningInstances = new Map()
 
-function listWidgets () {
+async function listWidgets () {
   return Object.entries(widgetRegistry).map(([id, mod]) => ({
     id,
     info: mod.widgetInfo
