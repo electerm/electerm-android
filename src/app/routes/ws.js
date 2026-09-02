@@ -5,16 +5,11 @@ import {
 } from '../common/runtime-constants.js'
 import { verifyWs, initWs } from '../server/dispatch-center.js'
 import {
-  terminals,
-  cleanAllSessions
+  terminals
 } from '../server/remote-common.js'
 import { zmodemManager } from '../server/zmodem.js'
 import { trzszManager } from '../server/trzsz.js'
 import { xmodemManager } from '../server/xmodem.js'
-
-function cleanup () {
-  cleanAllSessions()
-}
 
 // True when the buffered data ends mid-way through a multi-byte UTF-8
 // sequence (CJK chars are 3 bytes). Slow SSH servers (embedded router CLIs)
@@ -281,7 +276,12 @@ export function wsRoutes (app) {
       log.debug('Closed terminal ' + pid)
       // Clean things up
       ws.close && ws.close()
-      cleanup()
+      // NOTE: only the closing session is killed above. Do NOT add a
+      // cleanAllSessions() here: this close handler fires whenever a single
+      // tab is closed OR any one session drops (ssh error / network), and
+      // killing every session in the global map would disconnect all other
+      // open tabs too. Each session type already cleans itself up from its
+      // own ws close handler; whole-process cleanup is handled on app exit.
     }
 
     term.on('close', onClose)
