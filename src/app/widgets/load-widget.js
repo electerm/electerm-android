@@ -6,7 +6,6 @@ import * as widgetLocalFileServer from './widget-local-file-server.js'
 import * as widgetLocalFtpServer from './widget-local-ftp-server.js'
 import * as widgetMcpServer from './widget-mcp-server.js'
 import * as widgetRename from './widget-rename.js'
-import * as widgetSshServer from './widget-ssh-server.js'
 
 // Registry maps widget ID → module. Add new widgets here.
 const widgetRegistry = {
@@ -14,8 +13,7 @@ const widgetRegistry = {
   'local-file-server': widgetLocalFileServer,
   'local-ftp-server': widgetLocalFtpServer,
   'mcp-server': widgetMcpServer,
-  rename: widgetRename,
-  'ssh-server': widgetSshServer
+  rename: widgetRename
 }
 
 const widgetIdPattern = /^[a-z0-9-]+$/
