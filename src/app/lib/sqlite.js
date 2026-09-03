@@ -85,7 +85,7 @@ export async function dbAction (dbName, op, ...args) {
     return
   }
   if (!tables.includes(dbName)) {
-    throw new Error(`Table ${dbName} does not exist`)
+    return console.error(`Table ${dbName} does not exist`)
   }
 
   // Get the appropriate database for this table
