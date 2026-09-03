@@ -1,6 +1,6 @@
 {
   "name": "electerm-android",
-  "version": "5.3.16",
+  "version": "5.3.26",
   "private": true,
   "type": "module",
   "description": "electerm for Android — a free and open-source ssh/sftp/telnet/RDP/VNC/Spice/ftp client, built with Capacitor + a Node.js runtime.",
