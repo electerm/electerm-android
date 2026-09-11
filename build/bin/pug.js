@@ -27,10 +27,10 @@ const pugContent = fs.readFileSync(entryPug, 'utf-8')
 const defaultAIPreset = {
   baseURLAI: 'https://ai.electerm.org/api/ai',
   apiPathAI: '/chat/completions',
-  modelAI: 'mistral-small-latest',
+  modelAI: 'free',
   authHeaderNameAI: 'Authorization: Bearer',
   id: 'ai.electerm.org',
-  nameAI: 'ai.electerm.org(default free)'
+  nameAI: 'ai.electerm.org'
 }
 const supportSessionTypes = [
   'ssh',
@@ -41,6 +41,13 @@ const supportSessionTypes = [
   'ftp',
   'spice'
 ]
+const sysMenu = [
+  'onNewSsh',
+  'openSetting',
+  'openAbout',
+  'zoom',
+  'reload'
+]
 const data = {
   version: pack.version,
   siteName: pack.name,
@@ -50,7 +57,8 @@ const data = {
   defaultAIPreset,
   downloadUpgradeFromBrowser: true,
   versionFile: 'version-android.html',
-  supportSessionTypes
+  supportSessionTypes,
+  sysMenu
 }
 const htmlContent = pug.render(pugContent, {
   filename: entryPug,

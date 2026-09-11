@@ -78,9 +78,18 @@ export async function checkDbUpgrade () {
 export async function doUpgrade () {
   const list = await getUpgradeVersionList()
   log.info('Upgrading...')
-  for (const { run } of list) {
-    const runFn = await run()
-    await runFn()
+  for (const { version: vv, run } of list) {
+    try {
+      const runFn = await run()
+      await runFn()
+    } catch (e) {
+      // A single broken migration script must never brick app startup:
+      // log it, stamp its version so it is not retried forever, continue
+      log.error(`Upgrade script ${vv} fails, skip it`, e)
+      if (vv) {
+        await updateDBVersion(vv)
+      }
+    }
   }
   log.info('Upgrade end')
 }

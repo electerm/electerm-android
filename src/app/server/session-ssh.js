@@ -23,6 +23,13 @@ import {
 import { createHostVerifier } from './ssh-known-hosts.js'
 import iconv from 'iconv-lite'
 import { maybeProxyCommand } from './ssh-proxy-command.js'
+import {
+  X11_HELP_URL,
+  getX11Candidates,
+  probeXServer,
+  x11Hint,
+  x11CookieHint
+} from './x11.js'
 
 // Encodings that are equivalent to UTF-8 (no conversion needed)
 const utf8Aliases = new Set(['utf-8', 'utf8', 'utf-8-strict'])
@@ -39,7 +46,43 @@ class TerminalSshBase extends TerminalBase {
     const hasX11 = initOptions.x11 === true
     this.display = hasX11 ? await this.getDisplay() : undefined
     this.x11Cookie = hasX11 ? await this.getX11Cookie() : undefined
+    if (hasX11) {
+      // runs in the background: never delay the connection for a probe
+      this.checkX11().catch(e => log.error('x11 check error', e))
+    }
     return this.sshConnect()
+  }
+
+  /**
+   * x11 forwarding fails silently when the local side cannot serve it,
+   * so probe the display once per session and tell the user what to do
+   */
+  async checkX11 () {
+    const ok = await probeXServer(getX11Candidates(this.display))
+    if (!ok) {
+      return this.notifyX11(x11Hint())
+    }
+    // windows has no xauth at all, an empty cookie is expected there
+    if (!this.x11Cookie && process.platform !== 'win32') {
+      return this.notifyX11(x11CookieHint())
+    }
+  }
+
+  /**
+   * warn the user about x11 problems, at most once per session
+   * @param {string} text
+   */
+  notifyX11 (text) {
+    if (!text || this.x11Notified || !this.ws) {
+      return
+    }
+    this.x11Notified = true
+    this.ws.s({
+      action: 'x11-warning',
+      message: text,
+      url: X11_HELP_URL,
+      tabId: this.initOptions?.srcTabId
+    })
   }
 
   reTryAltAlg () {
@@ -635,6 +678,8 @@ class TerminalSshBase extends TerminalBase {
           const maxPort = portStart + maxRetry
           const retry = () => {
             if (start >= maxPort) {
+              // every local x endpoint refused us, the remote app is stuck
+              this.notifyX11(`A remote app asked for X11 forwarding, but electerm could not reach any local X server (display: ${this.display || 'not set'}). ${x11Hint()}`)
               return
             }
             const xserversock = new net.Socket()
@@ -993,6 +1038,7 @@ class TerminalSshBase extends TerminalBase {
     this.privateKeyPath = null
     this.display = null
     this.x11Cookie = null
+    this.x11Notified = false
     this.conns = null
     this.jumpSshKeys = null
     this.jumpPrivateKeyPathFrom = null

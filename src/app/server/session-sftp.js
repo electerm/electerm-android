@@ -12,6 +12,10 @@ import globalState from './global-state.js'
 import { SshFs } from 'ssh2-scp'
 import iconv from 'iconv-lite'
 
+const modeDirectoryMask = 0o170000
+const modeDirectoryValue = 0o040000
+const modeSymbolicValue = 0o120000
+
 class SftpBase extends TerminalBase {
   connect (initOptions) {
     return this.remoteInitSftp(initOptions)
@@ -383,27 +387,35 @@ class SftpBase extends TerminalBase {
   list (remotePath) {
     return new Promise((resolve, reject) => {
       const { sftp } = this
-      const reg = /-/g
 
       sftp.readdir(remotePath, (err, list) => {
         if (err) {
           return reject(err)
         }
-        resolve(list.map(item => {
+        const reg = /-/g
+        const items = list.map(item => {
           const {
             filename,
-            longname,
-            attrs: {
-              size, mtime, atime, uid, gid, mode
-            }
+            longname = '',
+            attrs = {}
           } = item
+          const {
+            size, mtime, atime, uid, gid, mode
+          } = attrs
+          // trust mode type bits first, longname may be filename only on some servers
+          const typeByMode = typeof mode === 'number'
+            ? {
+                [modeDirectoryValue]: 'd',
+                [modeSymbolicValue]: 'l'
+              }[mode & modeDirectoryMask]
+            : undefined
           // from https://github.com/jyu213/ssh2-sftp-client/blob/master/src/index.js
           return {
-            type: longname.substr(0, 1),
+            type: typeByMode || longname.substr(0, 1) || '-',
             name: filename,
             size,
-            modifyTime: mtime * 1000,
-            accessTime: atime * 1000,
+            modifyTime: mtime ? mtime * 1000 : undefined,
+            accessTime: atime ? atime * 1000 : undefined,
             mode,
             rights: {
               user: longname.substr(1, 3).replace(reg, ''),
@@ -413,7 +425,8 @@ class SftpBase extends TerminalBase {
             owner: uid,
             group: gid
           }
-        }))
+        })
+        resolve(items)
       })
     })
   }

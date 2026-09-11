@@ -32,11 +32,18 @@ const tar = `http://${host}:${port}`
 const defaultAIPreset = {
   baseURLAI: 'https://ai.electerm.org/api/ai',
   apiPathAI: '/chat/completions',
-  modelAI: 'mistral-small-latest',
+  modelAI: 'free',
   authHeaderNameAI: 'Authorization: Bearer',
   id: 'ai.electerm.org',
-  nameAI: 'ai.electerm.org(default free)'
+  nameAI: 'ai.electerm.org'
 }
+const sysMenu = [
+  'onNewSsh',
+  'openSetting',
+  'openAbout',
+  'zoom',
+  'reload'
+]
 const base = {
   version: pack.version,
   isDev: !isProd,
@@ -53,6 +60,7 @@ const base = {
   cdn: h,
   isWebApp: true,
   sessionLogPath: logDir,
+  sysMenu,
   tokenElecterm: process.env.ENABLE_AUTH ? '' : createToken()
 }
 let needMigrate

@@ -8,25 +8,19 @@ import {
   isWin,
   packInfo,
   home,
-  extIconPath,
-  defaultUserName,
-  cwd
+  extIconPath
 } from '../common/runtime-constants.js'
-import { migrationNotice } from './fancy-console.js'
 import fsFunctions from '../common/fs-functions.js'
 import copy from 'json-deep-copy'
 import { createToken } from './jwt.js'
 import { logDir } from '../server/session-log.js'
-import { resolve } from 'path'
-import fs from 'fs'
-
 const defaultAIPreset = {
   baseURLAI: 'https://ai.electerm.org/api/ai',
   apiPathAI: '/chat/completions',
-  modelAI: 'mistral-small-latest',
+  modelAI: 'free',
   authHeaderNameAI: 'Authorization: Bearer',
   id: 'ai.electerm.org',
-  nameAI: 'ai.electerm.org(default free)'
+  nameAI: 'ai.electerm.org'
 }
 
 function buildServer () {
@@ -68,7 +62,18 @@ export async function index (req, res) {
     server,
     hasNodePty,
     needMigrate: false,
-    supportSessionTypes
+    supportSessionTypes,
+    // eg: window.et.sysMenus = ['onNewSsh', 'bookmarks', 'openSetting', 'close']
+    // available keys: onNewSsh, addTab, bookmarks, history, sessions, layout,
+    // openAbout, openSetting, openDevTools, zoom, minimize, maximize, reload,
+    // onCheckUpdate, restart, close
+    sysMenus: [
+      'onNewSsh',
+      'openSetting',
+      'openAbout',
+      'zoom',
+      'reload'
+    ]
   }
   const {
     ENABLE_AUTH

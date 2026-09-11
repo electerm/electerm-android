@@ -79,6 +79,9 @@ class TerminalTelnet extends TerminalBase {
   }
 
   resize (cols, rows) {
+    if (!this.channel) {
+      return
+    }
     Object.assign(this.channel.options, {
       terminalWidth: cols,
       terminalHeight: rows
