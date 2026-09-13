@@ -81,11 +81,43 @@ function uint8ToBase64 (u8) {
 
 function isNativePlatform () {
   try {
+    // Capacitor core itself detects android via window.androidBridge (the
+    // native JavascriptInterface, attached to the WebView so it survives
+    // top-level navigation to the on-device backend at 127.0.0.1).
+    // window.Capacitor may be missing if the injected runtime hasn't run,
+    // so check the bridge first and only then consult window.Capacitor.
+    if (typeof window !== 'undefined' && window.androidBridge) return true
     const cap = window.Capacitor
     if (!cap) return false
     if (typeof cap.isNativePlatform === 'function') return cap.isNativePlatform()
     if (typeof cap.getPlatform === 'function') return cap.getPlatform() !== 'web'
     return !!cap.isNative
+  } catch (e) {
+    return false
+  }
+}
+
+// The stock `<a download>` flow is a silent no-op inside Android WebView.
+// Detect it via the "; wv)" UA token so we can show an error instead of
+// pretending the download worked.
+function isAndroidWebView () {
+  try {
+    return /; wv\)/.test(window.navigator.userAgent || '')
+  } catch (e) {
+    return false
+  }
+}
+
+// True only when the NATIVE FileSharer implementation is reachable.
+// registerPlugin() with a `web` fallback silently uses the anchor-click
+// web implementation when the native plugin header is missing (e.g. `cap
+// sync` didn't pick up the dependency) — that web path is a no-op in the
+// WebView, so we must not mistake it for a working native saver.
+function hasNativeFileSharer () {
+  try {
+    const cap = window.Capacitor
+    const headers = cap && cap.PluginHeaders
+    return !!(headers && headers.some(h => h && h.name === 'FileSharer'))
   } catch (e) {
     return false
   }
@@ -104,8 +136,42 @@ async function getFileSharer () {
 
 export async function canSaveNative () {
   if (!isNativePlatform()) return false
+  if (!hasNativeFileSharer()) return false
   const saver = await getFileSharer()
   return !!saver
+}
+
+// Diagnostic helper for on-device debugging (remote inspector console):
+//   await window.et.downloadDiag()
+// Reports each link of the download chain so a broken one is identifiable.
+export async function downloadDiag () {
+  const info = {
+    hasCapacitor: !!(window.Capacitor),
+    hasAndroidBridge: !!(typeof window !== 'undefined' && window.androidBridge),
+    capacitorPlatform: null,
+    isNativePlatform: isNativePlatform(),
+    hasNativeFileSharerHeader: hasNativeFileSharer(),
+    fileSharerModuleLoaded: false,
+    isAndroidWebView: isAndroidWebView(),
+    userAgent: (window.navigator && window.navigator.userAgent) || ''
+  }
+  try {
+    if (window.Capacitor && typeof window.Capacitor.getPlatform === 'function') {
+      info.capacitorPlatform = window.Capacitor.getPlatform()
+    }
+  } catch (e) {
+    info.capacitorPlatform = 'error: ' + (e && e.message)
+  }
+  try {
+    const saver = await getFileSharer()
+    info.fileSharerModuleLoaded = !!saver
+  } catch (e) {
+    info.fileSharerModuleLoaded = 'error: ' + (e && e.message)
+  }
+  try {
+    console.log('[electerm-android] downloadDiag:', JSON.stringify(info))
+  } catch (e) {}
+  return info
 }
 
 async function saveBase64Native ({ filename, base64Data, contentType }) {
@@ -153,13 +219,23 @@ function anchorDownloadFallback (filename, blob) {
 /**
  * Replacement for the broken-in-WebView blob-anchor download.
  * Fetches /api/download (token header included) and saves the result to
- * the public Downloads collection via MediaStore when running natively,
- * otherwise falls back to the classic blob-anchor download.
+ * the public Downloads collection via MediaStore when running natively.
+ * On plain desktop web it falls back to the classic blob-anchor download.
+ * Inside Android WebView WITHOUT a working native saver it reports an
+ * error instead of silently no-op anchor clicking.
  */
 export async function downloadPathFromServer (serverPath) {
   const fallbackName = basenameOf(serverPath)
   const url = '/api/download?path=' + encodeURIComponent(serverPath)
-  const res = await window.api.fetch(url).catch(window.store && window.store.onError)
+  let res
+  try {
+    res = await window.api.fetch(url)
+  } catch (err) {
+    const onError = window.store && window.store.onError
+    if (onError) onError(err)
+    else message.error('Download failed: ' + (err && err.message))
+    return
+  }
   if (!res) return
   const headerType = res.headers && res.headers.get
     ? res.headers.get('content-type')
@@ -180,8 +256,24 @@ export async function downloadPathFromServer (serverPath) {
       message.success('Saved to Downloads: ' + filename + (uri ? ' (' + uri + ')' : ''))
       return uri
     } catch (err) {
-      message.error('Save failed, downloading in browser instead: ' + (err && err.message))
+      console.log('[electerm-android] native save failed:', err)
+      message.error('Save failed: ' + (err && err.message))
+      return
     }
+  }
+  // No native saver. On a real desktop browser the anchor fallback works;
+  // inside Android WebView it is a silent no-op, so report instead of
+  // pretending the download happened. NOTE: on Android 10+ the MediaStore
+  // save needs no storage permission — the absence of a permission popup
+  // is normal; success is the "Saved to Downloads" toast above.
+  if (isAndroidWebView() || isNativePlatform()) {
+    downloadDiag()
+    message.error(
+      'Download failed: native file saver unavailable' +
+      (hasNativeFileSharer() ? '' : ' (FileSharer plugin not registered)') +
+      '. Check Downloads / retry.'
+    )
+    return
   }
   anchorDownloadFallback(filename, blob)
 }
@@ -191,4 +283,11 @@ export function installDownloadFromBrowserHook () {
   window.et.downloadFromBrowser = downloadPathFromServer
   window.et.saveBlobNative = saveBlobNative
   window.et.saveTextNative = saveTextNative
+  window.et.downloadDiag = downloadDiag
+  window.et.canSaveNative = canSaveNative
+  // Log the download chain state once at startup so `adb logcat` /
+  // remote-inspector captures it without manual repro steps.
+  try {
+    downloadDiag()
+  } catch (e) {}
 }
