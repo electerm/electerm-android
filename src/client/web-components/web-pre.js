@@ -1,5 +1,6 @@
 import * as path from './path.js'
 import message from '../electerm-react/components/common/message'
+import { installDownloadFromBrowserHook } from './native-file-save.js'
 
 const {
   ipcOnEvent,
@@ -255,3 +256,10 @@ function require (name) {
 require.resolve = name => name
 
 window.require = require
+
+// Android WebView has no handling for blob: URLs / `<a download>`, so the
+// stock "download from browser" flow silently does nothing there. Install a
+// native saver (MediaStore/Downloads via @capgo/capacitor-file-sharer, with
+// blob-anchor fallback on plain web) — sftp/file-item.jsx calls it through
+// `window.et.downloadFromBrowser(path)`.
+installDownloadFromBrowserHook()

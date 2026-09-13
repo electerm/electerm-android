@@ -82,9 +82,21 @@ export default class FileSelectDialog extends Component {
     e.target.value = ''
   }
 
-  handleBrowserDownload = () => {
+  handleBrowserDownload = async () => {
     const { opts } = this.state
     const { filename, content } = opts
+    // In the Android WebView blob-anchor downloads are a no-op, save via
+    // the native MediaStore/Downloads path when available (see
+    // web-components/native-file-save.js).
+    try {
+      if (window.et && window.et.saveTextNative) {
+        await window.et.saveTextNative(filename, content)
+        this.handleClose()
+        return
+      }
+    } catch (e) {
+      console.log('native save failed, falling back to browser download:', e)
+    }
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
