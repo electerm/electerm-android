@@ -72,24 +72,28 @@ jobs:
       - name: Sync Capacitor (copies web assets + native plugins)
         run: cd build/android && npx cap sync android
 
-      - name: Verify FileSharer native plugin is registered
-        # The in-app "download to Downloads" flow calls the native FileSharer
-        # plugin through the Capacitor bridge. If `cap sync` doesn't register
-        # it (missing dep, sync failure), the JS side silently falls back to
-        # the web implementation whose anchor-click download is a no-op inside
-        # Android WebView — downloads appear broken with no error. Fail fast.
+      - name: Verify file-sharer plugin is registered
+        # @capgo/capacitor-file-sharer is the secondary (non-Android) download
+        # path in src/client/web-components/native-file-save.js. If `cap sync`
+        # doesn't register it (missing dep, sync failure) that fallback is gone.
+        #
+        # NOTE: `cap sync` writes the npm package name and the native classpath,
+        # i.e. {"pkg":"@capgo/capacitor-file-sharer","classpath":"app.capgo.
+        # filesharer.FileSharerPlugin"}. There is no bare "FileSharer" key, so
+        # match on the package name (case-insensitive) — an earlier version of
+        # this guard grepped for '"FileSharer"' and therefore always failed.
         run: |
           PLUGINS_JSON=build/android/android/app/src/main/assets/capacitor.plugins.json
           if [ ! -f "$PLUGINS_JSON" ]; then
             echo "::error::capacitor.plugins.json not found at $PLUGINS_JSON"
             exit 1
           fi
-          grep -q '"FileSharer"' "$PLUGINS_JSON" || {
-            echo "::error::FileSharer plugin NOT registered in $PLUGINS_JSON"
+          grep -qi 'capacitor-file-sharer' "$PLUGINS_JSON" || {
+            echo "::error::@capgo/capacitor-file-sharer NOT registered in $PLUGINS_JSON"
             cat "$PLUGINS_JSON"
             exit 1
           }
-          echo "FileSharer plugin registered OK"
+          echo "file-sharer plugin registered OK"
 
       - name: Ensure nodejs-mobile gradle variable is defined
         # @capawesome/capacitor-nodejs expects $nodejsMobileVersion to be set.
@@ -158,6 +162,25 @@ jobs:
           rm -f "$RES/drawable-v24/ic_launcher_foreground.xml"
           rm -f "$RES/values/ic_launcher_background.xml"
           find "$RES" -type f -name 'splash.png' -path '*/drawable*' -delete
+
+      - name: Verify native download bridge is wired
+        # The UI page is served by the in-app Node.js server on
+        # http://127.0.0.1:5577 — NOT by Capacitor's own origin — so Capacitor
+        # never injects PluginHeaders there and every Capacitor plugin silently
+        # degrades to its web implementation (a no-op inside the WebView).
+        # "Download to Downloads" therefore goes through our own
+        # @JavascriptInterface bridge instead. If the overlay copy above ever
+        # silently stops landing these files, the APK still builds but downloads
+        # are broken with no error, so assert they are in the Gradle source tree.
+        run: |
+          JAVA=build/android/android/app/src/main/java/org/electerm/electerm
+          fail=0
+          [ -f "$JAVA/ElectermSaveBridge.java" ] || {
+            echo "::error::ElectermSaveBridge.java missing at $JAVA"; fail=1; }
+          grep -q 'ElectermNative' "$JAVA/MainActivity.java" || {
+            echo "::error::MainActivity.java does not install the ElectermNative bridge"; fail=1; }
+          [ "$fail" -eq 0 ] || exit 1
+          echo "native download bridge wired OK"
 
       - name: Configure per-ABI APK splits
         # Produce one APK per architecture (arm64-v8a, armeabi-v7a, x86_64)
