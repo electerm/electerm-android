@@ -21,6 +21,7 @@ jobs:
     if: ${{ !contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && !contains(github.event.head_commit.message, '[no ci]') && !contains(github.event.head_commit.message, '[skip actions]') && !contains(github.event.head_commit.message, '[actions skip]') }}
     permissions:
       contents: read
+    environment: build
 
     steps:
       - name: Checkout
@@ -246,3 +247,36 @@ jobs:
           path: build/android/android/app/build/outputs/apk/named/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Configure AWS credentials for R2
+        run: |
+          mkdir -p ~/.aws
+          cat > ~/.aws/credentials << 'EOF'
+          [default]
+          aws_access_key_id = ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          aws_secret_access_key = ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          EOF
+          cat > ~/.aws/config << 'EOF'
+          [default]
+          region = auto
+          endpoint_url = ${{ secrets.CF_R2_ENDPOINT }}
+          EOF
+
+      - name: Upload dev APKs to R2 (root folder)
+        env:
+          CF_R2_BUCKET: ${{ secrets.CF_R2_BUCKET }}
+        run: |
+          for file in build/android/android/app/build/outputs/apk/named/*.apk; do
+            [ -f "$file" ] || continue
+            fname=$(basename "$file")
+            aws s3 cp "$file" "s3://${CF_R2_BUCKET}/${fname}" \
+              --acl public-read \
+              --cache-control "max-age=31536000"
+            echo "Uploaded: ${fname}"
+          done
+
+      - name: Verify uploads
+        env:
+          CF_R2_BUCKET: ${{ secrets.CF_R2_BUCKET }}
+        run: |
+          aws s3 ls "s3://${CF_R2_BUCKET}/" --recursive
