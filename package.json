@@ -1,6 +1,6 @@
 {
   "name": "electerm-android",
-  "version": "5.5.6",
+  "version": "5.5.9",
   "description": "electerm for Android — a free and open-source ssh/sftp/telnet/RDP/VNC/Spice/ftp client, built on the electerm-web codebase with Capacitor.",
   "main": "src/app/app.js",
   "type": "module",
@@ -19,6 +19,7 @@
     "fix": "./node_modules/.bin/standard --fix",
     "lock": "npm i --package-lock-only",
     "r": "./build/bin/release",
+    "d": "./build/bin/dev",
     "test": "npm run test:integration",
     "test:integration": "node --test test/integration/mcp.spec.js"
   },
@@ -86,6 +87,8 @@
     "vite": "^8.0.15"
   },
   "dependencies": {
+    "@capacitor/core": "^8.5.2",
+    "@capgo/capacitor-file-sharer": "^8.1.9",
     "@electerm/electerm-locales": "^2.3.17",
     "@electerm/electerm-themes": "^1.0.1",
     "@electerm/ftp-srv": "1.0.5",
