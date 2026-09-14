@@ -2,7 +2,9 @@ package org.electerm.electerm;
 
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.WebView;
 import androidx.core.view.WindowCompat;
+import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
 
 /**
@@ -24,12 +26,19 @@ import com.getcapacitor.BridgeActivity;
  * content FrameLayout. This constrains the WebView within the safe area.
  * The listener is re-applied in onPostCreate/onResume and via post() to
  * ensure it runs after Capacitor's bridge initialization.
+ *
+ * It also installs {@link ElectermSaveBridge} as `window.ElectermNative`.
+ * The UI page is served by the on-device Node backend (http://127.0.0.1:5577),
+ * outside Capacitor's own origin, so Capacitor never injects its plugin
+ * runtime there and the browser download path cannot work. See
+ * ElectermSaveBridge for the full story.
  */
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        installSaveBridge();
         applySafeAreaPadding();
     }
 
@@ -43,7 +52,30 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        // Re-attach: it is idempotent, and it guarantees the bridge is present
+        // even if the WebView was recreated while we were backgrounded.
+        installSaveBridge();
         applySafeAreaPadding();
+    }
+
+    /**
+     * Attach the native save bridge to Capacitor's WebView. addJavascriptInterface
+     * injects into the live JS context and every document loaded afterwards, so
+     * this only needs to happen before the user triggers a download.
+     */
+    private void installSaveBridge() {
+        Bridge bridge = getBridge();
+        if (bridge == null) {
+            return;
+        }
+        WebView webView = bridge.getWebView();
+        if (webView == null) {
+            return;
+        }
+        webView.addJavascriptInterface(
+            new ElectermSaveBridge(getApplicationContext(), webView),
+            "ElectermNative"
+        );
     }
 
     /**
