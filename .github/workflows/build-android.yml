@@ -175,21 +175,6 @@ jobs:
           restore-keys: |
             gradle-wrapper-${{ runner.os }}-
 
-      - name: Build debug APK
-        # Retry up to 3 times to handle transient network errors when
-        # downloading the Gradle distribution for the first time (i.e. cache miss).
-        run: |
-          cd build/android/android && chmod +x gradlew
-          for i in 1 2 3; do
-            ./gradlew assembleDebug && break
-            if [ "$i" -eq 3 ]; then
-              echo "::error::Build failed after 3 attempts"
-              exit 1
-            fi
-            echo "Attempt $i failed, retrying in 15s…"
-            sleep 15
-          done
-
       - name: Build release APK (signed with persistent keystore)
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
@@ -197,7 +182,7 @@ jobs:
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
         run: |
-          cd build/android/android
+          cd build/android/android && chmod +x gradlew
           KEYSTORE="$PWD/app/release.keystore"
           printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
           keytool -list -keystore "$KEYSTORE" -storepass "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
@@ -208,33 +193,25 @@ jobs:
             -Pandroid.injected.signing.key.password="$ANDROID_RELEASE_KEY_PASSWORD"
 
       - name: Rename APKs to electerm-android-{arch}-{version}.apk
-        # Version comes from package.json. Each per-ABI APK is renamed to
-        # electerm-android-{arch}-{version}.apk (release) /
-        # electerm-android-{arch}-{version}-debug.apk (debug). The {arch} is
-        # parsed from gradle's per-ABI output filename; falls back to
-        # "universal" for the universal build (or if splits are off).
+        # Version comes from package.json. Each per-ABI release APK is renamed
+        # to electerm-android-{arch}-{version}.apk. The {arch} is parsed from
+        # gradle's per-ABI output filename; falls back to "universal" for the
+        # universal build (or if splits are off).
         id: rename
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           APKROOT=build/android/android/app/build/outputs/apk
           mkdir -p "$APKROOT/named"
-          for variant in debug release; do
-            dir="$APKROOT/$variant"
-            [ -d "$dir" ] || continue
-            for apk in "$dir"/*.apk; do
-              [ -f "$apk" ] || continue
-              name=$(basename "$apk")
-              arch=$(printf '%s' "$name" | grep -oE 'arm64-v8a|armeabi-v7a|x86_64|universal' | head -1)
-              [ -z "$arch" ] && arch=universal
-              if [ "$variant" = release ]; then
-                out="electerm-android-$arch-$VERSION.apk"
-              else
-                out="electerm-android-$arch-$VERSION-debug.apk"
-              fi
-              cp "$apk" "$APKROOT/named/$out"
-              echo "  $variant/$name -> named/$out"
-            done
+          dir="$APKROOT/release"
+          for apk in "$dir"/*.apk; do
+            [ -f "$apk" ] || continue
+            name=$(basename "$apk")
+            arch=$(printf '%s' "$name" | grep -oE 'arm64-v8a|armeabi-v7a|x86_64|universal' | head -1)
+            [ -z "$arch" ] && arch=universal
+            out="electerm-android-$arch-$VERSION.apk"
+            cp "$apk" "$APKROOT/named/$out"
+            echo "  release/$name -> named/$out"
           done
           echo "=== named APKs ==="
           ls -la "$APKROOT/named/"
@@ -296,19 +273,8 @@ jobs:
           # Substitute the version placeholder (heredoc above is literal).
           sed -i "s/\${VERSION}/${VERSION}/g" /tmp/release-notes.md
 
-          # Collect release-only APKs (exclude *-debug.apk).
-          # Debug APKs remain available via the CI artifact upload above
-          # but are NOT published to the GitHub Release.
-          RELEASE_APKS=()
-          for apk in "$APKROOT"/*.apk; do
-            case "$apk" in
-              *-debug.apk)
-                echo "Skipping debug APK from release assets: $(basename "$apk")"
-                continue
-                ;;
-            esac
-            RELEASE_APKS+=("$apk")
-          done
+          # Collect release APKs.
+          RELEASE_APKS=("$APKROOT"/*.apk)
 
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
