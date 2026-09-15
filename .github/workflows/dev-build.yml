@@ -41,6 +41,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default `packages` is "tools platform-tools", but Google
+          # removed the legacy `tools` package, so sdkmanager exits 1 with
+          # "Warning: Failed to find package 'tools'"
+          # (https://github.com/android-actions/setup-android/issues/537).
+          # Override it here so only supported packages get installed.
+          packages: platform-tools
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
