@@ -151,6 +151,7 @@
     ],
     "ignore": [
       "/public/",
+      "/src",
       "src/client/entry-web/rle.js"
     ],
     "sourceType": "module"

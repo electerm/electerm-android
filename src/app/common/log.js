@@ -57,9 +57,12 @@ function emit (level, args) {
   const line = `[${ts()}] ${level} › ${args.map(formatArg).join(' ')}`
   if (LEVELS[level] <= threshold) {
     const fn =
-      level === 'error' ? console.error
-        : level === 'warn' ? console.warn
-          : level === 'debug' ? console.debug
+      level === 'error'
+        ? console.error
+        : level === 'warn'
+          ? console.warn
+          : level === 'debug'
+            ? console.debug
             : console.log
     fn(line)
   }
