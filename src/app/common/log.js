@@ -77,6 +77,12 @@ const logger = {
   warn: (...args) => emit('warn', args),
   info: (...args) => emit('info', args),
   debug: (...args) => emit('debug', args),
+  // electron-log compatibility: `log()` is an alias for `info()`.
+  // SSH retry/tunnel/proxy-command code calls `log.log(...)` (and passes
+  // `log.log` as the ssh2 debug callback); without this it throws
+  // `TypeError: log.log is not a function` and breaks retries, e.g.
+  // encrypted-key passphrase / connection hopping flows.
+  log: (...args) => emit('info', args),
   // kept for minimal API compatibility with callers that touch transports
   transports: { console: { format: '' } }
 }
