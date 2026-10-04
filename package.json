@@ -11,17 +11,18 @@
     "start": "NODE_ENV=development node ./build/vite/dev-server.js",
     "clean": "node build/bin/clean",
     "compile": "node build/bin/build",
-    "build:android": "node build/android/build.mjs",
+    "build:android": "node build/bin/install.js && node build/android/build.mjs",
     "logo": "python3 build/bin/gen-logo.py",
     "vite-build": "cross-env NODE_ENV=production vite build --config ./build/vite/conf.js",
-    "install": "node build/bin/install",
+    "install": "node build/bin/install.js",
     "lint": "./node_modules/.bin/standard --verbose",
     "fix": "./node_modules/.bin/standard --fix",
     "lock": "npm i --package-lock-only",
     "r": "./build/bin/release",
     "d": "./build/bin/dev",
-    "test": "npm run test:integration",
-    "test:integration": "node --test test/integration/mcp.spec.js"
+    "test": "npm run test:integration && npm run test:src",
+    "test:integration": "node --test test/integration/mcp.spec.js",
+    "test:src": "node --test test/src.spec.js"
   },
   "license": "MIT",
   "languageRepo": "https://github.com/electerm/electerm-locales",
@@ -150,6 +151,7 @@
       "self"
     ],
     "ignore": [
+      "build/android/www",
       "/public/",
       "/src",
       "src/client/entry-web/rle.js"

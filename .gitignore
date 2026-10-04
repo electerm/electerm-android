@@ -113,10 +113,14 @@ dist
 /build/iTerm2-Color-Schemes
 /database
 /electerm_session_logs
-/src/electerm-react
+# src/ is generated, not tracked. build/bin/install.js materialises it from the
+# tip of upstream electerm-web's default branch + the Android delta in
+# build/replace + build/delete-list.js. The only part that is not from upstream
+# is src/client/electerm-react, which is copied from the
+# @electerm/electerm-react npm package.
+/src
 /test-results
 /data
-/src/client/electerm-react
 /data1
 .vscode
 .trae
