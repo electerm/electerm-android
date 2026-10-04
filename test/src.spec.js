@@ -180,3 +180,43 @@ test('install.js skips the download when the ref and delta are unchanged', () =>
     'src/ref was rewritten, so the run did not actually skip'
   )
 })
+
+const VERSION_FILE = path.resolve(SRC, 'client/electerm-react/version')
+const INSTALLED_PKG = path.resolve(ROOT, 'node_modules/@electerm/electerm-react/package.json')
+
+/** The version of the electerm-react package actually installed in node_modules. */
+function installedClientVersion () {
+  return JSON.parse(fs.readFileSync(INSTALLED_PKG, 'utf8')).version
+}
+
+test('the generated client records the electerm-react package version', () => {
+  assert.ok(
+    fs.existsSync(VERSION_FILE),
+    'src/client/electerm-react/version is missing — run `npm install` first'
+  )
+  assert.equal(
+    fs.readFileSync(VERSION_FILE, 'utf8').trim(),
+    installedClientVersion(),
+    'src/client/electerm-react/version does not match the installed package'
+  )
+})
+
+test('a stale client version defeats the skip', () => {
+  // The upstream ref and delta are both unchanged here, so only the version
+  // check can force the reinstall. Simulate the real case: the package was
+  // bumped in package.json, but src/ still holds the previous client.
+  fs.writeFileSync(VERSION_FILE, '0.0.0-stale\n')
+
+  const out = node(INSTALL)
+
+  assert.doesNotMatch(
+    out,
+    /skipping download/,
+    `expected install.js to reinstall, got:\n${out}`
+  )
+  assert.equal(
+    fs.readFileSync(VERSION_FILE, 'utf8').trim(),
+    installedClientVersion(),
+    'install.js did not rewrite the version file'
+  )
+})

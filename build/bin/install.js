@@ -10,7 +10,10 @@
  *
  * and then `src/client/electerm-react` is copied from the
  * @electerm/electerm-react npm package — upstream's `src/` does not contain it,
- * it is generated from the package.
+ * it is generated from the package. The package's `client/` dir carries no
+ * version marker, so install.js writes one alongside it:
+ * `src/client/electerm-react/version` holds the package version the tree came
+ * from.
  *
  * Nothing is pinned: every run resolves the current tip of upstream `main`, so
  * there is no sha or tag to maintain. This is the `install` lifecycle script, so
@@ -18,7 +21,8 @@
  * tree.
  *
  * src/ref records what `src/` was built from, so a run whose upstream ref *and*
- * delta both match what is recorded skips the download entirely.
+ * delta both match what is recorded — and whose client is already the installed
+ * @electerm/electerm-react version — skips the download entirely.
  *
  * Ordering matters twice:
  *   - the overlay is applied *before* the delete list, so a delete-list entry
@@ -47,6 +51,12 @@ const SRC_DIR = path.resolve(ROOT, 'src')
 const CLIENT_REL = 'src/client/electerm-react'
 const CLIENT_PKG = 'node_modules/@electerm/electerm-react/client'
 const CLIENT_DIR = path.resolve(ROOT, CLIENT_REL)
+
+// The client tree is a straight copy of the package's client/ dir, which has no
+// version marker of its own, so the version is recorded next to it.
+const CLIENT_PKG_JSON = path.resolve(ROOT, 'node_modules/@electerm/electerm-react/package.json')
+const CLIENT_VERSION_REL = `${CLIENT_REL}/version`
+const CLIENT_VERSION_FILE = path.resolve(CLIENT_DIR, 'version')
 
 // Records the upstream ref `src/` was built from, plus a fingerprint of the
 // delta. Lives inside src/ but is not part of it, so the sync excludes it.
@@ -94,6 +104,29 @@ function remoteRef () {
 function readRef () {
   try {
     return JSON.parse(fs.readFileSync(REF_FILE, 'utf8'))
+  } catch (e) {
+    return null
+  }
+}
+
+/** Version of the @electerm/electerm-react package sitting in node_modules. */
+function clientVersion () {
+  let pkg
+  try {
+    pkg = JSON.parse(fs.readFileSync(CLIENT_PKG_JSON, 'utf8'))
+  } catch (e) {
+    fail(`cannot read ${path.relative(ROOT, CLIENT_PKG_JSON)} — is @electerm/electerm-react installed?`)
+  }
+  if (!pkg.version) {
+    fail(`${path.relative(ROOT, CLIENT_PKG_JSON)} has no version field`)
+  }
+  return pkg.version
+}
+
+/** What src/client/electerm-react/version currently says, or null. */
+function readClientVersion () {
+  try {
+    return fs.readFileSync(CLIENT_VERSION_FILE, 'utf8').trim()
   } catch (e) {
     return null
   }
@@ -255,6 +288,21 @@ function installClient () {
 }
 
 /**
+ * Record which @electerm/electerm-react version the generated client came from.
+ *
+ * Must run *after* installClient(), whose rsync --delete would otherwise remove
+ * the file (the package's client/ dir has no such entry).
+ *
+ * This is not just a label: bumping @electerm/electerm-react in package.json
+ * moves neither the upstream ref nor the delta, so without a version check the
+ * skip would fire and leave the previous client in src/ forever.
+ */
+function writeClientVersion (version) {
+  fs.writeFileSync(CLIENT_VERSION_FILE, version + '\n')
+  echo(`wrote ${CLIENT_VERSION_REL}: ${version}`)
+}
+
+/**
  * Anything under build/replace/src/client/electerm-react/** is copied over the
  * freshly generated client. This is the only part of build/replace applied here
  * rather than to the upstream tree, because the client does not exist until
@@ -294,6 +342,7 @@ function applyClientOverrides () {
 async function main () {
   const ref = remoteRef()
   const delta = deltaHash()
+  const client = clientVersion()
   const recorded = readRef()
 
   if (
@@ -302,9 +351,10 @@ async function main () {
     recorded.branch === BRANCH &&
     recorded.ref === ref &&
     recorded.delta === delta &&
-    fs.existsSync(CLIENT_DIR)
+    fs.existsSync(CLIENT_DIR) &&
+    readClientVersion() === client
   ) {
-    echo(`up to date: ${REPO}@${ref.slice(0, 7)} (${BRANCH}), delta unchanged — skipping download`)
+    echo(`up to date: ${REPO}@${ref.slice(0, 7)} (${BRANCH}), delta unchanged, electerm-react ${client} — skipping download`)
     return
   }
 
@@ -335,6 +385,7 @@ async function main () {
 
   installClient()
   applyClientOverrides()
+  writeClientVersion(client)
 
   // Written last, and without a timestamp, so a given upstream ref + delta
   // always produce the same file: re-running leaves src/ byte-identical.
