@@ -20,9 +20,10 @@
  * a plain `npm install` (which is what CI runs) is all it takes to get a working
  * tree.
  *
- * src/ref records what `src/` was built from, so a run whose upstream ref *and*
- * delta both match what is recorded — and whose client is already the installed
- * @electerm/electerm-react version — skips the download entirely.
+ * `install-records.ref` (repo root, gitignored) records what `src/` was built
+ * from — the upstream ref, the @electerm/electerm-react version, and a
+ * fingerprint of the delta. A run whose ref *and* version *and* delta all match
+ * what is recorded skips the download entirely.
  *
  * Ordering matters twice:
  *   - the overlay is applied *before* the delete list, so a delete-list entry
@@ -58,10 +59,13 @@ const CLIENT_PKG_JSON = path.resolve(ROOT, 'node_modules/@electerm/electerm-reac
 const CLIENT_VERSION_REL = `${CLIENT_REL}/version`
 const CLIENT_VERSION_FILE = path.resolve(CLIENT_DIR, 'version')
 
-// Records the upstream ref `src/` was built from, plus a fingerprint of the
-// delta. Lives inside src/ but is not part of it, so the sync excludes it.
-const REF_REL = 'ref'
-const REF_FILE = path.resolve(SRC_DIR, REF_REL)
+// Records what `src/` was built from: the upstream ref, the client package
+// version, and a fingerprint of the delta. Gitignored, and deliberately outside
+// src/ — it describes the generated tree rather than being part of it, so the
+// sync needs no exclude for it (and a leftover `src/ref` from the old layout is
+// swept away by `--delete`).
+const RECORD_REL = 'install-records.ref'
+const RECORD_FILE = path.resolve(ROOT, RECORD_REL)
 
 function echo (...a) {
   console.log('[install]', ...a)
@@ -101,9 +105,9 @@ function remoteRef () {
   return sha
 }
 
-function readRef () {
+function readRecord () {
   try {
-    return JSON.parse(fs.readFileSync(REF_FILE, 'utf8'))
+    return JSON.parse(fs.readFileSync(RECORD_FILE, 'utf8'))
   } catch (e) {
     return null
   }
@@ -255,8 +259,12 @@ function applyDeleteList (root) {
  * rsync a tree into place. `--delete` makes the destination exactly the source,
  * and the excludes keep paths that are generated separately.
  *
- * The exclude has no trailing slash on purpose: a trailing slash would make
- * rsync match directories only, and src/ref is a file.
+ * The excludes are written without a trailing slash. That no longer matters for
+ * the current callers (the only one left is a directory), but it is the rule to
+ * keep: rsync reads a trailing slash as directories-only, so a *file* excluded
+ * as `--exclude=/name/` would silently not match and `--delete` would remove it.
+ * That is how the old in-tree `src/ref` record had to be excluded before the
+ * record moved to the repo root.
  */
 function syncInto (from, to, excludes = []) {
   fs.mkdirSync(to, { recursive: true })
@@ -343,18 +351,19 @@ async function main () {
   const ref = remoteRef()
   const delta = deltaHash()
   const client = clientVersion()
-  const recorded = readRef()
+  const recorded = readRecord()
 
   if (
     recorded &&
     recorded.repo === REPO &&
     recorded.branch === BRANCH &&
     recorded.ref === ref &&
+    recorded.electermReact === client &&
     recorded.delta === delta &&
     fs.existsSync(CLIENT_DIR) &&
     readClientVersion() === client
   ) {
-    echo(`up to date: ${REPO}@${ref.slice(0, 7)} (${BRANCH}), delta unchanged, electerm-react ${client} — skipping download`)
+    echo(`up to date: ${REPO}@${ref.slice(0, 7)} (${BRANCH}), electerm-react ${client}, delta unchanged — skipping download`)
     return
   }
 
@@ -370,9 +379,9 @@ async function main () {
     // is consumed; keeping the root means repo-relative paths line up exactly.
     applyOverlay(root, CLIENT_REL)
     applyDeleteList(root)
-    // src/ is replaced wholesale, minus the generated client and src/ref —
-    // both are written separately below.
-    syncInto(upstreamSrc, SRC_DIR, ['client/electerm-react', REF_REL])
+    // src/ is replaced wholesale, minus the generated client, which is written
+    // separately below.
+    syncInto(upstreamSrc, SRC_DIR, ['client/electerm-react'])
     echo(`src/ = ${REPO}@${BRANCH} + build/replace + build/delete-list.js`)
   } finally {
     try {
@@ -387,13 +396,19 @@ async function main () {
   applyClientOverrides()
   writeClientVersion(client)
 
-  // Written last, and without a timestamp, so a given upstream ref + delta
-  // always produce the same file: re-running leaves src/ byte-identical.
+  // Written last, and without a timestamp, so a given upstream ref + client
+  // version + delta always produce the same file: re-running does not churn it.
   fs.writeFileSync(
-    REF_FILE,
-    JSON.stringify({ repo: REPO, branch: BRANCH, ref, delta }, null, 2) + '\n'
+    RECORD_FILE,
+    JSON.stringify({
+      repo: REPO,
+      branch: BRANCH,
+      ref,
+      electermReact: client,
+      delta
+    }, null, 2) + '\n'
   )
-  echo(`wrote src/${REF_REL}: ${REPO}@${ref.slice(0, 7)}`)
+  echo(`wrote ${RECORD_REL}: ${REPO}@${ref.slice(0, 7)}, electerm-react ${client}`)
   echo('done install required modules')
 }
 

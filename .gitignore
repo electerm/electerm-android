@@ -119,6 +119,10 @@ dist
 # is src/client/electerm-react, which is copied from the
 # @electerm/electerm-react npm package.
 /src
+# What src/ was built from — upstream electerm-web ref, @electerm/electerm-react
+# version and a delta fingerprint. Written by build/bin/install.js; a run whose
+# three records all match skips the download.
+/install-records.ref
 /test-results
 /data
 /data1

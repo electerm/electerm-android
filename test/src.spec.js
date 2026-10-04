@@ -37,11 +37,23 @@ const WWW = path.resolve(ROOT, 'build/android/www')
 const INSTALL = path.resolve(ROOT, 'build/bin/install.js')
 const BUILD = path.resolve(ROOT, 'build/android/build.mjs')
 
-// `client/electerm-react` comes from the npm package, not upstream; `ref` is
-// install.js's bookkeeping about the tree. Neither is part of the generated
-// tree, so both are excluded from every comparison.
+// `client/electerm-react` comes from the npm package, not upstream. `ref` is the
+// *old* in-tree record location: install.js no longer writes it, and the sync
+// sweeps it away, but it stays excluded so this comparison is robust on a tree
+// that has not been regenerated since the move.
 const EXCLUDED = ['client/electerm-react', 'ref']
-const REF_FILE = path.resolve(SRC, 'ref')
+
+// The record lives at the repo root (gitignored), outside the generated tree.
+const RECORD_FILE = path.resolve(ROOT, 'install-records.ref')
+const LEGACY_REF_FILE = path.resolve(SRC, 'ref')
+
+const VERSION_FILE = path.resolve(SRC, 'client/electerm-react/version')
+const INSTALLED_PKG = path.resolve(ROOT, 'node_modules/@electerm/electerm-react/package.json')
+
+/** The version of the electerm-react package actually installed in node_modules. */
+function installedClientVersion () {
+  return JSON.parse(fs.readFileSync(INSTALLED_PKG, 'utf8')).version
+}
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
 
@@ -142,12 +154,16 @@ test('regenerated src/ and its build output are byte-identical to the reference'
   console.log(`[src] before: ${srcBefore.size} src files, ${wwwBefore.size} build files`)
 
   // ---- after --------------------------------------------------------------
-  // Drop src/ref so install.js cannot take the skip path: this test is about
+  // Drop the record so install.js cannot take the skip path: this test is about
   // the pipeline actually running.
   await t.test('install.js regenerates src/', () => {
-    fs.rmSync(REF_FILE, { force: true })
+    fs.rmSync(RECORD_FILE, { force: true })
     const out = node(INSTALL)
     console.log(out.trim())
+    assert.ok(
+      !fs.existsSync(LEGACY_REF_FILE),
+      'the old in-tree src/ref record should be swept away by the sync'
+    )
   })
 
   const srcAfter = treeMap(SRC)
@@ -161,12 +177,24 @@ test('regenerated src/ and its build output are byte-identical to the reference'
   console.log(`[src] build output identical: ${wwwAfter.size} files, sha256 ${mapHash(wwwAfter).slice(0, 16)}…`)
 })
 
-test('install.js skips the download when the ref and delta are unchanged', () => {
-  assert.ok(fs.existsSync(REF_FILE), 'src/ref should exist after an install')
+test('install-records.ref records the ref, the client version and the delta', () => {
+  const rec = JSON.parse(fs.readFileSync(RECORD_FILE, 'utf8'))
+  assert.equal(rec.repo, 'electerm/electerm-web')
+  assert.match(rec.ref, /^[0-9a-f]{40}$/, 'ref should be a full commit sha')
+  assert.match(rec.delta, /^[0-9a-f]{64}$/, 'delta should be a sha256')
+  assert.equal(
+    rec.electermReact,
+    installedClientVersion(),
+    'the recorded electerm-react version should match the installed package'
+  )
+})
+
+test('install.js skips the download when the ref, client version and delta are unchanged', () => {
+  assert.ok(fs.existsSync(RECORD_FILE), 'install-records.ref should exist after an install')
 
   // Park the mtime, so a rewrite is detectable even if the contents are equal.
   const parked = new Date(2000, 0, 1)
-  fs.utimesSync(REF_FILE, parked, parked)
+  fs.utimesSync(RECORD_FILE, parked, parked)
   const before = treeMap(SRC)
 
   const out = node(INSTALL)
@@ -175,19 +203,11 @@ test('install.js skips the download when the ref and delta are unchanged', () =>
   const diff = diffTrees(before, treeMap(SRC))
   assert.equal(diff, null, `a skipped run changed src/:\n${diff}`)
   assert.equal(
-    fs.statSync(REF_FILE).mtimeMs,
+    fs.statSync(RECORD_FILE).mtimeMs,
     parked.getTime(),
-    'src/ref was rewritten, so the run did not actually skip'
+    'install-records.ref was rewritten, so the run did not actually skip'
   )
 })
-
-const VERSION_FILE = path.resolve(SRC, 'client/electerm-react/version')
-const INSTALLED_PKG = path.resolve(ROOT, 'node_modules/@electerm/electerm-react/package.json')
-
-/** The version of the electerm-react package actually installed in node_modules. */
-function installedClientVersion () {
-  return JSON.parse(fs.readFileSync(INSTALLED_PKG, 'utf8')).version
-}
 
 test('the generated client records the electerm-react package version', () => {
   assert.ok(
@@ -201,10 +221,33 @@ test('the generated client records the electerm-react package version', () => {
   )
 })
 
-test('a stale client version defeats the skip', () => {
-  // The upstream ref and delta are both unchanged here, so only the version
-  // check can force the reinstall. Simulate the real case: the package was
+test('a stale recorded electerm-react version defeats the skip', () => {
+  // The upstream ref and the delta are both unchanged here, so only the version
+  // record can force the reinstall. This is the real case: the package was
   // bumped in package.json, but src/ still holds the previous client.
+  const rec = JSON.parse(fs.readFileSync(RECORD_FILE, 'utf8'))
+  fs.writeFileSync(
+    RECORD_FILE,
+    JSON.stringify({ ...rec, electermReact: '0.0.0-stale' }, null, 2) + '\n'
+  )
+
+  const out = node(INSTALL)
+
+  assert.doesNotMatch(
+    out,
+    /skipping download/,
+    `expected install.js to reinstall, got:\n${out}`
+  )
+  assert.equal(
+    JSON.parse(fs.readFileSync(RECORD_FILE, 'utf8')).electermReact,
+    installedClientVersion(),
+    'install.js did not rewrite the recorded version'
+  )
+})
+
+test('a missing or tampered client version file defeats the skip', () => {
+  // The record is correct here, so only the artifact check can force the
+  // reinstall — the version file must never be left missing or wrong by a skip.
   fs.writeFileSync(VERSION_FILE, '0.0.0-stale\n')
 
   const out = node(INSTALL)
