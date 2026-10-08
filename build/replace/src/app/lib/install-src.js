@@ -12,6 +12,22 @@
 // every split without a build-time injection step: the APK the user installed
 // only contains the native libraries for its target ABI, so os.arch() always
 // reflects the ABI that is actually running on device.
+//
+// NO FILE EXTENSION. This string has to satisfy two contracts at once:
+//
+//  1. electerm.org's /data/electerm-github-release.json?src=<this> filter
+//     (src/release-asset-filter.js there). It normalises both sides with
+//     assetKey()/assetStem(), so an extension-less query resolves to the real
+//     file: "?src=electerm-android-arm64-v8a" -> electerm-android-arm64-v8a-<ver>.apk.
+//
+//  2. the client's asset match in @electerm/electerm-react's update-check.js:
+//       assets.find(r => r.name.includes(installSrc))
+//     Published asset names carry the version BETWEEN the abi and the
+//     extension (electerm-android-arm64-v8a-5.5.76.apk), so no string that
+//     ends in ".apk" can ever be a substring of one. With ".apk" appended,
+//     `.includes()` returns false, browserDownloadUrl comes back empty and
+//     `doUpgrade()` hits its `if (downloadUrl)` guard and returns silently —
+//     the Upgrade button looks dead. Keep this version-less and extension-less.
 
 import os from 'os'
 
@@ -26,6 +42,6 @@ const archMap = {
 }
 
 const arch = os.arch()
-const installSrc = 'electerm-android-' + (archMap[arch] || 'arm64-v8a') + '.apk'
+const installSrc = 'electerm-android-' + (archMap[arch] || 'arm64-v8a')
 
 export default installSrc
