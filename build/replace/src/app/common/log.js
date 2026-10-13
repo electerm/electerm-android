@@ -18,7 +18,7 @@ function levelFromEnv () {
   return Object.prototype.hasOwnProperty.call(LEVELS, raw) ? LEVELS[raw] : LEVELS.info
 }
 
-const threshold = levelFromEnv()
+let threshold = levelFromEnv()
 
 let logFile = null
 try {
@@ -75,6 +75,25 @@ function emit (level, args) {
   }
 }
 
+// Verbose-logging toggle. Upstream electerm-web's log.js exports
+// `setDebugMode`/`isDebugMode`, and user-config.js / session-ssh.js call
+// `log.setDebugMode` when the `debug` setting flips — this replace logger must
+// expose the same API or those calls throw. Enabling drops the emit threshold
+// to `debug` so the ssh2 protocol trace (passed around as `log.log`) reaches
+// the log file; disabling restores the LOG_LEVEL-configured threshold.
+const DEBUG_ENV = 'ELECTERM_DEBUG'
+
+function isDebugMode () {
+  return process.env[DEBUG_ENV] === '1'
+}
+
+function setDebugMode (enabled = true) {
+  process.env[DEBUG_ENV] = enabled ? '1' : ''
+  threshold = enabled ? LEVELS.debug : levelFromEnv()
+}
+
+setDebugMode(isDebugMode())
+
 const logger = {
   error: (...args) => emit('error', args),
   warn: (...args) => emit('warn', args),
@@ -87,7 +106,10 @@ const logger = {
   // encrypted-key passphrase / connection hopping flows.
   log: (...args) => emit('info', args),
   // kept for minimal API compatibility with callers that touch transports
-  transports: { console: { format: '' } }
+  transports: { console: { format: '' } },
+  // verbose-logging API, mirrors upstream log.js (see setDebugMode above)
+  setDebugMode,
+  isDebugMode
 }
 
 export default logger
