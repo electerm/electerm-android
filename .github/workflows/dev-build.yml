@@ -179,6 +179,10 @@ jobs:
         # @JavascriptInterface bridge instead. If the overlay copy above ever
         # silently stops landing these files, the APK still builds but downloads
         # are broken with no error, so assert they are in the Gradle source tree.
+        #
+        # Same story for the window-chrome bridge (status bar / navigation bar
+        # colours from the UI theme): losing ElectermWindowChrome.java gives an
+        # APK that builds fine but shows system-white strips around a dark theme.
         run: |
           JAVA=build/android/android/app/src/main/java/org/electerm/electerm
           fail=0
@@ -186,8 +190,12 @@ jobs:
             echo "::error::ElectermSaveBridge.java missing at $JAVA"; fail=1; }
           grep -q 'ElectermNative' "$JAVA/MainActivity.java" || {
             echo "::error::MainActivity.java does not install the ElectermNative bridge"; fail=1; }
+          [ -f "$JAVA/ElectermWindowChrome.java" ] || {
+            echo "::error::ElectermWindowChrome.java missing at $JAVA"; fail=1; }
+          grep -q '"ElectermChrome"' "$JAVA/MainActivity.java" || {
+            echo "::error::MainActivity.java does not install the ElectermChrome bridge"; fail=1; }
           [ "$fail" -eq 0 ] || exit 1
-          echo "native download bridge wired OK"
+          echo "native download + window chrome bridges wired OK"
 
       - name: Configure per-ABI APK splits
         # Produce one APK per architecture (arm64-v8a, armeabi-v7a, x86_64)

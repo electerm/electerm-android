@@ -8,11 +8,21 @@
              (footer batch input, modals) stay visible instead of being
              covered by the keyboard. -->
         <item name="android:windowSoftInputMode">adjustResize</item>
-        <!-- Match the electerm dark background so the status bar / nav bar
-             areas (which are now excluded from WebView content via
-             setDecorFitsSystemWindows(true) in MainActivity) blend in with
-             the app instead of showing a jarring white strip. -->
+        <!-- Boot colour for the status bar / nav bar strips (see
+             ElectermWindowChrome: the live theme colours replace these as soon
+             as the page reports them). targetSdk 35+ ignores these two items —
+             the strips are then painted by the chrome views instead — but they
+             still avoid a system-white flash on older releases and before the
+             first inset pass. -->
         <item name="android:statusBarColor">@color/electerm_bg</item>
         <item name="android:navigationBarColor">@color/electerm_bg</item>
+        <!-- Android 12+ draws its own starting window and takes the colour from
+             windowSplashScreenBackground, NOT from windowBackground — left unset
+             it falls back to the light theme's colorBackground, which is the
+             grey/white flash (with white status-bar strips) shown while the
+             engine boots. Same colour as the splash drawable so the hand-off
+             from starting window to first frame is invisible. Ignored below
+             API 31. -->
+        <item name="android:windowSplashScreenBackground">@color/electerm_bg</item>
     </style>
 </resources>

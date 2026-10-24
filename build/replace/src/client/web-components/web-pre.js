@@ -1,6 +1,7 @@
 import * as path from './path.js'
 import message from '../electerm-react/components/common/message'
 import { installDownloadFromBrowserHook } from './native-file-save.js'
+import { installWindowChromeSync } from './window-chrome.js'
 
 const {
   ipcOnEvent,
@@ -263,3 +264,10 @@ window.require = require
 // blob-anchor fallback on plain web) — sftp/file-item.jsx calls it through
 // `window.et.downloadFromBrowser(path)`.
 installDownloadFromBrowserHook()
+
+// Android only: keep the status-bar / navigation-bar strips painted with the
+// *theme's* --main-dark / --main instead of the system light/dark default.
+// Those strips live outside the web page (edge-to-edge is enforced on
+// targetSdk 35+), and this is the only place that knows the live theme
+// colours. No-op on a plain browser.
+installWindowChromeSync()

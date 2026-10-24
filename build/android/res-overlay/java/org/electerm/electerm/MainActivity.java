@@ -10,35 +10,40 @@ import com.getcapacitor.BridgeActivity;
 /**
  * electerm custom MainActivity.
  *
- * Problem: On Android 15+ (API 35+, e.g. Google Pixel 9), Capacitor's
- * BridgeActivity enables edge-to-edge display by calling
- *   WindowCompat.setDecorFitsSystemWindows(getWindow(), false)
- * and setting up its own OnApplyWindowInsetsListener that consumes system
- * bar insets without applying them as padding. This causes the WebView
- * content to extend under the status bar, making the tab bar area
- * unclickable.
+ * Layout: the Activity runs edge-to-edge
+ * (WindowCompat.setDecorFitsSystemWindows(window, false)) and the root content
+ * view is padded by the system-bar insets, so the WebView stays inside the safe
+ * area. The decor background under the WebView is not reachable from CSS, hence
+ * the explicit padding instead of letting the page bleed under the bars.
  *
- * Simply calling setDecorFitsSystemWindows(true) is NOT enough because
- * Capacitor's listener still consumes the insets without applying padding.
+ * Edge-to-edge is not optional here: with the previous
+ * setDecorFitsSystemWindows(true) the framework inset the window and Capacitor's
+ * own OnApplyWindowInsetsListener consumed the insets without applying them,
+ * leaving the tab bar under the status bar on Android 15+. Padding explicitly is
+ * the fix, and it is also what lets {@link ElectermWindowChrome} paint the two
+ * system-bar strips — on targetSdk 35+ android:statusBarColor and
+ * android:navigationBarColor are ignored by the framework.
  *
- * Fix: Override the content view's OnApplyWindowInsetsListener to apply
- * system bar insets (status bar + navigation bar) as padding on the root
- * content FrameLayout. This constrains the WebView within the safe area.
- * The listener is re-applied in onPostCreate/onResume and via post() to
- * ensure it runs after Capacitor's bridge initialization.
+ * It also installs two WebView -> native bridges. The UI page is served by the
+ * on-device Node backend (http://127.0.0.1:5577), outside Capacitor's own
+ * origin, so Capacitor never injects its plugin runtime there and every plugin
+ * silently falls back to its web implementation (a no-op in a WebView). Anything
+ * that must reach native is a plain @JavascriptInterface object attached here:
  *
- * It also installs {@link ElectermSaveBridge} as `window.ElectermNative`.
- * The UI page is served by the on-device Node backend (http://127.0.0.1:5577),
- * outside Capacitor's own origin, so Capacitor never injects its plugin
- * runtime there and the browser download path cannot work. See
- * ElectermSaveBridge for the full story.
+ *   window.ElectermNative  {@link ElectermSaveBridge}    - public Downloads save
+ *   window.ElectermChrome  {@link ElectermWindowChrome}  - system-bar colours
+ *                                                          from the UI theme
  */
 public class MainActivity extends BridgeActivity {
+
+    private ElectermWindowChrome windowChrome;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-        installSaveBridge();
+        windowChrome = new ElectermWindowChrome(this);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        installBridges();
         applySafeAreaPadding();
     }
 
@@ -51,19 +56,22 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-        // Re-attach: it is idempotent, and it guarantees the bridge is present
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        // Re-attach: it is idempotent, and it guarantees the bridges are present
         // even if the WebView was recreated while we were backgrounded.
-        installSaveBridge();
+        installBridges();
         applySafeAreaPadding();
+        if (windowChrome != null) {
+            windowChrome.refresh();
+        }
     }
 
     /**
-     * Attach the native save bridge to Capacitor's WebView. addJavascriptInterface
+     * Attach the native bridges to Capacitor's WebView. addJavascriptInterface
      * injects into the live JS context and every document loaded afterwards, so
-     * this only needs to happen before the user triggers a download.
+     * this only needs to happen before the page needs them.
      */
-    private void installSaveBridge() {
+    private void installBridges() {
         Bridge bridge = getBridge();
         if (bridge == null) {
             return;
@@ -76,17 +84,21 @@ public class MainActivity extends BridgeActivity {
             new ElectermSaveBridge(getApplicationContext(), webView),
             "ElectermNative"
         );
+        if (windowChrome != null) {
+            webView.addJavascriptInterface(windowChrome, "ElectermChrome");
+        }
     }
 
     /**
      * Apply system bar insets (status bar + navigation bar) as padding to
      * the root content view (android.R.id.content) so the WebView stays
-     * within the safe area.
+     * within the safe area — and hand the same numbers to the window chrome,
+     * which paints those padding bands with the current theme colours.
      *
      * We override any OnApplyWindowInsetsListener that Capacitor's Bridge
-     * may have set on the content view, and apply the insets as padding.
-     * The listener is set both synchronously and via post() to ensure it
-     * runs after Capacitor's (possibly async) bridge initialization.
+     * may have set on the content view. The listener is set both synchronously
+     * and via post() to ensure it runs after Capacitor's (possibly async)
+     * bridge initialization.
      */
     private void applySafeAreaPadding() {
         View contentView = findViewById(android.R.id.content);
@@ -102,7 +114,9 @@ public class MainActivity extends BridgeActivity {
         contentView.setOnApplyWindowInsetsListener((v, insets) -> {
             int top = insets.getSystemWindowInsetTop();
             int bottom = insets.getSystemWindowInsetBottom();
-            v.setPadding(0, top, 0, bottom);
+            if (windowChrome != null) {
+                windowChrome.applyInsets(v, top, bottom);
+            }
             // Consume system window insets so the WebView (child) doesn't
             // double-apply them. The keyboard is handled via
             // android:windowSoftInputMode=adjustResize in the theme, which
