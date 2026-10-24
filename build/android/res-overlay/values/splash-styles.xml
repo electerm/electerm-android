@@ -10,19 +10,30 @@
         <item name="android:windowSoftInputMode">adjustResize</item>
         <!-- Boot colour for the status bar / nav bar strips (see
              ElectermWindowChrome: the live theme colours replace these as soon
-             as the page reports them). targetSdk 35+ ignores these two items —
-             the strips are then painted by the chrome views instead — but they
+             as the page reports them). targetSdk 35+ ignores these two items -
+             the strips are then painted by the chrome views instead - but they
              still avoid a system-white flash on older releases and before the
              first inset pass. -->
         <item name="android:statusBarColor">@color/electerm_bg</item>
         <item name="android:navigationBarColor">@color/electerm_bg</item>
         <!-- Android 12+ draws its own starting window and takes the colour from
-             windowSplashScreenBackground, NOT from windowBackground — left unset
+             windowSplashScreenBackground, NOT from windowBackground - left unset
              it falls back to the light theme's colorBackground, which is the
              grey/white flash (with white status-bar strips) shown while the
              engine boots. Same colour as the splash drawable so the hand-off
              from starting window to first frame is invisible. Ignored below
              API 31. -->
         <item name="android:windowSplashScreenBackground">@color/electerm_bg</item>
+        <!-- The splash icon. Never let the framework fall back to the launcher
+             icon here: the launcher icon carries its own plate (the white disc
+             of the legacy bitmap, the brown adaptive background) which the
+             system renders as an opaque square/circle around the logo - the
+             "white box behind the icon" seen on HarmonyOS 4. This drawable is
+             the bare electerm mark on a transparent canvas. -->
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+        <!-- ...and the plate behind it, which several OEM builds default to
+             white. Tie it to the app background so there is nothing to see but
+             the logo on #15171a. -->
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/electerm_bg</item>
     </style>
 </resources>

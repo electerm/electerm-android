@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-Android-12 starting window (android:windowBackground). API 31+ ignores
+     this and draws its own splash from the windowSplashScreen* items in
+     splash-styles.xml, but the two must look the same or the hand-off flashes.
+
+     The old content was splash_logo.png - a *black* wordmark on #15171a, i.e.
+     invisible. Reuse the same white mark the Android 12 splash draws so both
+     paths render identically. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <color android:color="@color/electerm_bg" />
     </item>
-    <item>
-        <bitmap
-            android:src="@drawable/splash_logo"
-            android:gravity="center"
-            android:tileMode="disabled" />
-    </item>
+    <item
+        android:drawable="@drawable/splash_icon"
+        android:gravity="center"
+        android:width="144dp"
+        android:height="144dp" />
 </layer-list>
