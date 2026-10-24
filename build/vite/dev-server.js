@@ -203,6 +203,19 @@ async function createServer () {
       }
     })
   )
+  // A user widget with its own UI is an <iframe> on /api/widget-ui/<id>/<file>
+  // (the desktop app uses electerm-widget:// instead, see widgets/protocol.js
+  // there). The route is mounted on the backend, and vite serves the html, so
+  // without this forward the iframe 404s in `npm start` and the panel stays
+  // empty. Same origin, so the widget's own relative assets follow it through.
+  app.use(
+    '/api/widget-ui',
+    proxy(tar, {
+      proxyReqPathResolver: function (req) {
+        return req.originalUrl
+      }
+    })
+  )
 }
 
 createServer()
