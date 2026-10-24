@@ -22,7 +22,8 @@
     "d": "./build/bin/dev",
     "test": "npm run test:integration && npm run test:src",
     "test:integration": "node --test test/integration/mcp.spec.js",
-    "test:src": "node --test test/src.spec.js"
+    "test:src": "node --test test/src.spec.js",
+    "gen:index": "node build/bin/gen-index-html.js"
   },
   "license": "MIT",
   "languageRepo": "https://github.com/electerm/electerm-locales",

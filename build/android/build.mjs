@@ -10,7 +10,7 @@
  *
  * Steps:
  *   1. vite build the frontend  -> www/nodejs/dist/assets
- *   2. copy static assets (icons, images, views) into the node project
+ *   2. copy static assets (icons, images) into the node project
  *   3. esbuild bundle the backend -> www/nodejs/app.bundle.mjs. Native modules
  *      that are not built for Android yet (node-pty, serialport, node-bash,
  *      font-list) are kept *external*: the source loads them via guarded
@@ -20,11 +20,13 @@
  *      shim (the on-device runtime is Node 18, which has no built-in `node:sqlite`).
  */
 import { build as viteBuild } from 'vite'
+import { createConfig, entryNames } from './vite.android.mjs'
 import * as esbuild from 'esbuild'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+import { generateIndexHtml } from '../bin/gen-index-html.js'
 
 const require = createRequire(import.meta.url)
 const __filename = fileURLToPath(import.meta.url)
@@ -46,6 +48,15 @@ const VERSION = JSON.parse(
 // secret. For local development a fixed fallback is used.
 const LOCAL_DEV_SECRET = 'electerm-android-local-dev-secret'
 const SERVER_SECRET = process.env.SERVER_SECRET || LOCAL_DEV_SECRET
+// The package.json the node project carries on the device. The server reads it
+// as `packInfo`, so the build-time homepage must embed the same object — not
+// this repo's package.json, which runtime-constants would otherwise pick up.
+const NODE_PKG = {
+  name: 'electerm-node',
+  version: VERSION,
+  main: 'index.js',
+  type: 'module'
+}
 const IS_CI = !!process.env.CI
 if (IS_CI && SERVER_SECRET === LOCAL_DEV_SECRET) {
   console.error(
@@ -58,13 +69,67 @@ if (IS_CI && SERVER_SECRET === LOCAL_DEV_SECRET) {
 // --------------------------------------------------------------------------
 // 1. Frontend
 // --------------------------------------------------------------------------
+// The frontend is built once per entry with every dynamic import inlined
+// (see vite.android.mjs): on the device each asset is an HTTP round trip
+// through the single-threaded node server, so ~250 chunks with 138 of them on
+// the first screen cost ~2 s of launch time. 3 files cost ~0.
+const VITE_TMP = path.resolve(__dirname, '.gen', 'vite')
+
+function rmrfMaybe (dir) {
+  fs.rmSync(dir, { recursive: true, force: true })
+}
+
 async function runVite () {
   console.log('[android] building frontend (vite)…')
-  await viteBuild({
-    configFile: path.resolve(__dirname, 'vite.android.mjs'),
-    root: ROOT,
-    logLevel: 'warn'
-  })
+  rmrfMaybe(VITE_TMP)
+  for (const name of entryNames) {
+    const outDir = path.resolve(VITE_TMP, name, 'assets')
+    await viteBuild({
+      ...createConfig(name, outDir),
+      logLevel: 'warn'
+    })
+  }
+
+  // Assemble dist/assets from the per-entry outputs.
+  const assets = path.resolve(NODEJS_DIR, 'dist', 'assets')
+  // A stale chunk/ directory from an older build would still be packed into
+  // the APK even though nothing references it any more.
+  for (const stale of ['js', 'chunk', 'css']) {
+    rmrfMaybe(path.resolve(assets, stale))
+  }
+  fs.mkdirSync(assets, { recursive: true })
+  const cssParts = []
+  for (const name of entryNames) {
+    const out = path.resolve(VITE_TMP, name, 'assets')
+    if (!fs.existsSync(out)) {
+      continue
+    }
+    for (const entry of fs.readdirSync(out)) {
+      const from = path.join(out, entry)
+      if (entry === 'css') {
+        // cssCodeSplit:false gives one file per entry; the html only links
+        // css/style-<version>.css, so the entries have to be concatenated.
+        for (const file of fs.readdirSync(from).sort()) {
+          cssParts.push(fs.readFileSync(path.join(from, file), 'utf8'))
+        }
+      } else if (fs.statSync(from).isDirectory()) {
+        copyDir(from, path.resolve(assets, entry))
+      } else {
+        fs.copyFileSync(from, path.resolve(assets, entry))
+      }
+    }
+  }
+  if (cssParts.length) {
+    fs.mkdirSync(path.resolve(assets, 'css'), { recursive: true })
+    fs.writeFileSync(
+      path.resolve(assets, 'css', `style-${VERSION}.css`),
+      cssParts.join('\n')
+    )
+  }
+  const jsCount = fs
+    .readdirSync(path.resolve(assets, 'js'))
+    .filter(f => f.endsWith('.js')).length
+  console.log(`[android] frontend: ${jsCount} js file(s), ${cssParts.length} css file(s) merged`)
 }
 
 // --------------------------------------------------------------------------
@@ -102,11 +167,9 @@ function copyFrontendAssets () {
     path.resolve(assets, 'images')
   )
 
-  fs.mkdirSync(path.resolve(NODEJS_DIR, 'views'), { recursive: true })
-  fs.copyFileSync(
-    path.resolve(ROOT, 'src/app/views/index.pug'),
-    path.resolve(NODEJS_DIR, 'views/index.pug')
-  )
+  // No `views/` in the node project: the homepage is rendered to
+  // dist/assets/index.html at build time (build/bin/gen-index-html.js) and the
+  // runtime never reads a template from disk.
 }
 
 function writeLoadingPage () {
@@ -142,39 +205,64 @@ function writeLoadingPage () {
     // A top-level navigation is NOT a subresource (PNA does not apply) and the
     // network-security-config permits cleartext to 127.0.0.1, so once the engine
     // is up we navigate. allowNavigation:["127.0.0.1"] keeps it in-app.
+    //
+    // The engine does NOT start in a second: the plugin unpacks the node project
+    // and the 7-8 MB server bundle has to be parsed, which measured 11-15 s on
+    // the API 37 emulator (first run after an install is the slow end). So the
+    // navigation here is driven by a probe that keeps retrying, never by a
+    // fixed timer: a blind navigation that fires while the port is still closed
+    // lands the WebView on Chromium's "Webpage not available" page, which has no
+    // way back and made every cold launch of the app look broken.
     var PORT = 5577;
     var BASE = 'http://127.0.0.1:' + PORT + '/';
+    var RETRY_MS = 500;
+    var GIVE_UP_MS = 60000;
     var Http = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+    var startedAt = Date.now();
     var done = false;
-    function go (src) {
+    var msg = document.getElementById('msg');
+    function go () {
       if (done) return;
       done = true;
+      msg.textContent = 'Loading…';
       location.replace(BASE);
     }
-    function tryLoad () {
+    function probeOnce () {
       if (Http) {
-        Http.get({ url: BASE })
-          .then(function (r) {
-            if (r && r.status >= 200 && r.status < 500) go('capacitorhttp');
-            else setTimeout(tryLoad, 700);
-          })
-          .catch(function () {
-            document.getElementById('msg').textContent = 'Waiting for engine…';
-            setTimeout(tryLoad, 700);
-          });
-      } else {
-        fetch(BASE, { mode: 'no-cors' })
-          .then(function () { go('fetch'); })
-          .catch(function () {
-            document.getElementById('msg').textContent = 'Waiting for engine…';
-            setTimeout(tryLoad, 700);
-          });
+        return Http.get({ url: BASE, connectTimeout: 1000, readTimeout: 1000 })
+          .then(function (r) { return !!(r && r.status >= 100 && r.status < 500); })
+          .catch(function () { return false; });
       }
+      return fetch(BASE, { mode: 'no-cors' })
+        .then(function () { return true; })
+        .catch(function () { return false; });
     }
-    tryLoad();
-    // Fallback: probes blocked on this device -> after the engine has had time
-    // to come up (~1-2s), navigate directly (works because navigation is exempt).
-    setTimeout(function () { go('timeout'); }, 4000);
+    function giveUp () {
+      var btn = document.createElement('button');
+      btn.textContent = 'Retry';
+      btn.style.cssText = 'margin-top:6px;padding:8px 18px;border:0;border-radius:6px;' +
+        'background:#4aa3ff;color:#0b1017;font-size:14px;font-weight:600';
+      btn.onclick = function () {
+        startedAt = Date.now();
+        btn.remove();
+        msg.textContent = 'Waiting for engine…';
+        tick();
+      };
+      msg.textContent = 'The engine did not start. ';
+      msg.appendChild(btn);
+    }
+    function tick () {
+      if (done) return;
+      probeOnce().then(function (ok) {
+        if (done) return;
+        if (ok) return go();
+        var waited = Date.now() - startedAt;
+        if (waited > GIVE_UP_MS) return giveUp();
+        msg.textContent = 'Waiting for engine… ' + Math.round(waited / 1000) + 's';
+        setTimeout(tick, RETRY_MS);
+      });
+    }
+    tick();
   </script>
 </body>
 </html>
@@ -328,7 +416,11 @@ async function bundleBackend (shimPath) {
       'node-pty',
       'serialport',
       'node-bash',
-      'font-list'
+      'font-list',
+      // Dev-only template engine (see server/server.js): the guarded
+      // `if (isDev) await import('pug')` must not pull the compiler into the
+      // device bundle — it is 1.5 MB of @babel/parser + @babel/types + acorn.
+      'pug'
     ],
     // Some bundled CJS deps (e.g. sql.js's initSqlJs) reference __dirname /
     // __filename, which don't exist in an ESM bundle. Define them from
@@ -337,8 +429,15 @@ async function bundleBackend (shimPath) {
     // ("Identifier 'dirname' has already been declared"). Alias fileURLToPath
     // to a private name for the same reason, and derive __dirname from a
     // directory URL.
+    //
+    // Same rule for createRequire: src/app/widgets/user-widget.js imports it by
+    // name (a widget's own ESM/CJS entry has to be loaded through it), and a
+    // banner that also declares `createRequire` makes the whole bundle fail to
+    // link — "SyntaxError: Identifier 'createRequire' has already been
+    // declared", i.e. the on-device server never starts and the WebView sits on
+    // a blank page. Every name the banner needs is therefore aliased.
     banner: {
-      js: "import { createRequire } from 'module'; import { fileURLToPath as __etu } from 'url'; const require = createRequire(import.meta.url); const __filename = __etu(import.meta.url); const __dirname = __etu(new URL('.', import.meta.url));"
+      js: "import { createRequire as __cr } from 'module'; import { fileURLToPath as __etu } from 'url'; const require = __cr(import.meta.url); const __filename = __etu(import.meta.url); const __dirname = __etu(new URL('.', import.meta.url));"
     },
     plugins: [nativeNodePlugin, patchPathToRegexpPlugin],
     // keep node built-ins external; everything else is bundled
@@ -379,9 +478,7 @@ process.env.PORT = '5577'
 process.env.SERVER_SECRET = ${JSON.stringify(SERVER_SECRET)}
 // No real pty on Android -> disable the local terminal feature.
 process.env.DISABLE_LOCAL_TERMINAL = '1'
-// Tell the server where the pug views live (cwd is now the node project dir,
-// set above via process.chdir(__d)).
-process.env.VIEW_FOLDER = resolve(__d, 'views')
+// No VIEW_FOLDER: the one template is precompiled into the bundle.
 
 // Stable, app-private user-data directory.
 // The Node.js project is extracted by @capawesome/capacitor-nodejs into the
@@ -420,7 +517,7 @@ await import('./app.bundle.mjs')
   fs.writeFileSync(
     path.resolve(NODEJS_DIR, 'package.json'),
     JSON.stringify(
-      { name: 'electerm-node', version: VERSION, main: 'index.js', type: 'module' },
+      NODE_PKG,
       null,
       2
     )
@@ -549,6 +646,16 @@ async function main () {
 
   await runVite()
   copyFrontendAssets()
+  // Static homepage. Must run after runVite(), which recreates dist/assets.
+  const index = await generateIndexHtml({
+    outDir: path.resolve(NODEJS_DIR, 'dist', 'assets'),
+    secret: SERVER_SECRET,
+    user: process.env.SERVER_USER,
+    packInfo: NODE_PKG
+  })
+  console.log(
+    `[android] homepage: ${path.relative(ROOT, index.outPath)} (${index.bytes} bytes)`
+  )
   writeLoadingPage()
 
   const shimPath = await genSqliteShim()

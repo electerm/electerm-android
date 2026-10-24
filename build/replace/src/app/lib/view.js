@@ -1,28 +1,26 @@
 /**
  * simple login with password only
+ *
+ * Development only. In production the homepage is a static file:
+ * build/bin/gen-index-html.js renders `index.pug` once at build time into
+ * `dist/assets/index.html`, which express.static serves — no template engine, no
+ * per-request render, and the pug compiler (1.5 MB of the server bundle) stays
+ * out of the app.
+ *
+ * Both paths build the payload through lib/view-data.js so the dev page and the
+ * generated page cannot drift apart.
  */
 
 import {
   isDev,
   isMac,
   isWin,
-  packInfo,
-  home,
-  extIconPath
+  home
 } from '../common/runtime-constants.js'
-import fsFunctions from '../common/fs-functions.js'
-import copy from 'json-deep-copy'
 import { createToken } from './jwt.js'
 import { logDir } from '../server/session-log.js'
 import { getLogDir } from '../widgets/instance-log.js'
-const defaultAIPreset = {
-  baseURLAI: 'https://ai.electerm.org/api/ai',
-  apiPathAI: '/chat/completions',
-  modelAI: 'free',
-  authHeaderNameAI: 'Authorization: Bearer',
-  id: 'ai.electerm.org',
-  nameAI: 'ai.electerm.org'
-}
+import { buildViewData } from './view-data.js'
 
 function buildServer () {
   return `http://${process.env.HOST}:${process.env.PORT}`
@@ -31,61 +29,19 @@ function buildServer () {
 export async function index (req, res) {
   const server = process.env.SERVER || (isDev ? buildServer() : '')
   const cdn = process.env.CDN || server
-  const hasNodePty = false
-  // All session types the app knows about.
-  const supportSessionTypes = [
-    'ssh',
-    'telnet',
-    'web',
-    'rdp',
-    'vnc',
-    'ftp',
-    'spice'
-  ]
-  const data = {
+  const data = buildViewData({
     isDev,
     isMac,
     isWin,
-    packInfo,
-    home,
-    version: packInfo.version,
-    siteName: packInfo.name,
-    defaultAIPreset,
-    fsFunctions,
-    isWebApp: true,
-    disableUpgradeCheck: false,
-    versionFile: 'version-android.html',
-    downloadUpgradeFromBrowser: true,
-    extIconPath: cdn + extIconPath,
     cdn,
+    server,
+    home,
     sessionLogPath: logDir,
-    // where running widgets write their logs; the widget manager reads them
-    // straight off disk (see widgets/instance-log.js).
-    // Exposed as window.et.widgetLogPath, mirroring sessionLogPath above.
     widgetLogPath: getLogDir(),
     query: req.query,
-    server,
-    hasNodePty,
-    needMigrate: false,
-    supportSessionTypes,
-    // eg: window.et.sysMenus = ['onNewSsh', 'bookmarks', 'openSetting', 'close']
-    // available keys: onNewSsh, addTab, bookmarks, history, sessions, layout,
-    // openAbout, openSetting, openDevTools, zoom, minimize, maximize, reload,
-    // onCheckUpdate, restart, close
-    sysMenus: [
-      'onNewSsh',
-      'openSetting',
-      'openAbout',
-      'zoom',
-      'reload'
-    ]
-  }
-  const {
-    ENABLE_AUTH
-  } = process.env
-  if (!ENABLE_AUTH) {
-    data.tokenElecterm = createToken()
-  }
-  data._global = copy(data)
+    // The web UI auto-logs-in while ENABLE_AUTH is unset, which is how a
+    // password-less install gets a usable API token.
+    tokenElecterm: process.env.ENABLE_AUTH ? undefined : createToken()
+  })
   res.render('index', data)
 }
