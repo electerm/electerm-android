@@ -290,8 +290,9 @@ jobs:
         # new workflow runs — see GitHub docs:
         # https://docs.github.com/en/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow
         # The release: [published] event fired here is what wakes up:
-        #   - build-homepage-trigger.yml   (refreshes electerm.org)
-        #   - upload-release-assets-r1.yml (mirrors APKs to R2/r1)
+        #   - build-homepage-trigger.yml    (refreshes electerm.org)
+        #   - upload-release-assets-r2.yml  (mirrors APKs to R2/r1)
+        #   - sync-atomgit-release.yml      (mirrors tag + release to atomgit)
         # With GITHUB_TOKEN those downstream workflows stay silent.
         env:
           GH_TOKEN: ${{ secrets.PAT_REPO_TOKEN }}

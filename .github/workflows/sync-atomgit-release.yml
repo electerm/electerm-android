@@ -1,0 +1,420 @@
+name: sync-release-to-atomgit
+
+# Mirror the latest GitHub release (tag + notes + all APK assets) to
+# https://atomgit.com/electerm/electerm-android, same idea as the
+# sync-atomgit-release.yml in electerm/electerm (see that file for the long
+# version of the story). Differences that matter here:
+#
+#  - The atomgit repo is *currently* still a mirror repository (镜像仓库) of this
+#    GitHub repo: probed 2026-10-28, it serves 52 tags (up to v5.7.21) and its
+#    default branch main is at the same commit as GitHub's. So code arrives on
+#    its own; only releases + attachments have to be pushed, because a mirror
+#    never creates releases.
+#  - electerm had to push tag + master because its mirror was removed. Here the
+#    push is attempted too (so the job keeps working on the day the mirror is
+#    removed too, which is exactly what happened over there), but a push
+#    rejected with the mirror error is downgraded to a warning as long as
+#    atomgit already serves the tag. The release is the point of this job.
+#  - Default branch is main (electerm used master).
+#
+# atomgit release attachments: single file <= 2GB, no documented total quota.
+# A full electerm-android release is ~340MB (universal APK alone is ~160MB), so
+# stacking a few is survivable, but we still keep only the newest release by
+# default -- set keep_previous=true on a manual run if you want them to pile up.
+#
+# What the atomgit API can and cannot do (probed on electerm 2026-09-28):
+#   DELETE /releases/:tag                      -> 405 Method Not Allowed
+#   DELETE /releases/:tag/attach_files/:id     -> works, but only for assets
+#     whose JSON has an "id"; the 4 auto generated source archives (type
+#     "source") have none, so they cannot be removed and stay on every release.
+# So "keep only the newest" means: empty the old releases, they stay behind as
+# empty shells plus their source archives (a few KB). Attachments are the only
+# real space, and those we do delete.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to sync, e.g. v5.7.21 (default: version in package.json)'
+        required: false
+        type: string
+      keep_previous:
+        description: 'Keep previously synced releases on atomgit (default: delete them)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # Same environment as the R2 upload job, so the secret may live either on
+    # the environment or on the repo -- electerm/electerm keeps ATOMGIT_TOKEN on
+    # its `build` environment.
+    environment: build
+    env:
+      OWNER: electerm
+      REPO: electerm-android
+      # The git push username is the *account*, not the org. Verified on the
+      # electerm repo 2026-10-02: `ssh -T git@atomgit.com` answers
+      # "Welcome to GitCode, zxdong262".
+      ATOMGIT_USER: zxdong262
+      # The attachment PUT goes to file.gitcode.com, which resolves to a
+      # mainland-China Huawei OBS gateway. From a GitHub runner that route
+      # crawls (41 KB/s measured on electerm, i.e. ~2h for a 340MB release).
+      # This Huawei Cloud IP serves the same OBS backend (presigned URL and its
+      # callback work unchanged) at ~8 MB/s. It is only used as --resolve
+      # (Host/SNI stay file.gitcode.com); if it ever goes away the connect fails
+      # and we fall back to plain DNS on the next attempt.
+      UPLOAD_IP: 159.138.147.37
+    steps:
+      # fetch-depth 0 is required, not a preference: a tag push from the default
+      # depth-1 clone is rejected with
+      #   ! [remote rejected] ... (shallow update not allowed)
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          tag="${INPUT_TAG:-$RELEASE_TAG}"
+          if [ -z "$tag" ]; then
+            tag="v$(node -p "require('./package.json').version")"
+          fi
+          case "$tag" in
+            v*) ;;
+            *) tag="v$tag" ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "syncing $tag"
+
+      # The release event checks out the tag (detached), so refs/heads/main is
+      # not there locally -- fetch it explicitly or there is nothing to push.
+      #
+      # Order matters twice over:
+      #  - before Create release, because POST /releases without a
+      #    target_commitish asks atomgit to create the tag itself, and against a
+      #    mirror repo that is what used to answer 400 "this operation is not
+      #    allowed because the repository is an image repository".
+      #  - before Download release assets, so a failure here costs seconds
+      #    instead of pulling ~340MB first.
+      - name: Push tag and main to atomgit
+        env:
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -eu
+          # Keep the token out of the URL: git prints the URL on failure, and a
+          # credential helper is the supported way to feed it in anyway.
+          cred="$(mktemp)"
+          printf '#!/bin/sh\necho "username=%s"\necho "password=%s"\n' \
+            "$ATOMGIT_USER" "$ATOMGIT_TOKEN" > "$cred"
+          chmod +x "$cred"
+          trap 'rm -f "$cred"' EXIT
+
+          url="https://atomgit.com/${OWNER}/${REPO}.git"
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+          echo "pushing ${TAG} and main to atomgit ..."
+          # --force on both refs: a re-run finds the tag already there, a re-cut
+          # release must be able to move it, and atomgit's main may be a stale
+          # mirror snapshot that GitHub's main has moved ahead of.
+          push_ok=1
+          git -c credential.helper="$cred" push --force "$url" \
+            "refs/tags/${TAG}:refs/tags/${TAG}" \
+            "refs/remotes/origin/main:refs/heads/main" || push_ok=0
+
+          # A mirror repo rejects every push with
+          #   403 <CH.00905403> This operation is not allowed because the
+          #   repository is an image repository.
+          # while still serving the tag through the mirror, so what we actually
+          # depend on is "atomgit serves the refs back", not "the push worked".
+          for i in 1 2 3 4 5; do
+            remote="$(git ls-remote "$url" "refs/tags/${TAG}" "refs/heads/main" || true)"
+            if printf '%s\n' "$remote" | grep -q "refs/tags/${TAG}$" && \
+               printf '%s\n' "$remote" | grep -q "refs/heads/main$"; then
+              if [ "$push_ok" = 1 ]; then
+                echo "tag ${TAG} and main are on atomgit"
+              else
+                echo "::warning::git push to atomgit was rejected, but ${TAG} and main are served (repo is still a mirror) -- syncing the release only"
+                echo "When the mirror is removed this job will hard fail here; the fix is a token with code-push scope, or an account SSH key as ATOMGIT_SSH_KEY + git@atomgit.com:${OWNER}/${REPO}.git"
+              fi
+              exit 0
+            fi
+            echo "waiting for the refs to become readable (${i}/5)"
+            sleep 3
+          done
+          echo "::error::atomgit does not serve ${TAG}/main, and the push failed"
+          echo "If the token has no code-push scope, add the account SSH key as an"
+          echo "ATOMGIT_SSH_KEY secret and point this step at"
+          echo "  git@atomgit.com:${OWNER}/${REPO}.git"
+          printf '%s\n' "$remote"
+          exit 1
+
+      - name: Download release assets from GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -eu
+          mkdir -p ./release-assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir ./release-assets
+          echo "--- assets ---"
+          find ./release-assets -type f -exec ls -l {} + \
+            | awk '{printf "%12s  %s\n", $5, $9; t += $5}
+                   END {printf "total: %.1f MB\n", t / 1048576}'
+
+      # Re-run safety: drop whatever a previous attempt left on this tag, so
+      # asset names stay unique and the asset count check below stays exact.
+      - name: Reset attachments on the sync tag
+        env:
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -u
+          api="https://api.atomgit.com/api/v5/repos/${OWNER}/${REPO}"
+          auth="access_token=${ATOMGIT_TOKEN}"
+          curl -sS "${api}/releases/${TAG}?${auth}" \
+            | jq -r '(.assets // [])[] | select(.type == "attach") | "\(.id) \(.name)"' \
+            | while read -r id name; do
+            [ -n "$id" ] && [ "$id" != "null" ] || continue
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+              "${api}/releases/${TAG}/attach_files/${id}?${auth}" || echo 000)"
+            echo "  rm stale attachment $name ($id) -> $code"
+          done
+
+      - name: Create release on atomgit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -u
+          api="https://api.atomgit.com/api/v5/repos/${OWNER}/${REPO}"
+          auth="access_token=${ATOMGIT_TOKEN}"
+
+          body="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body)"
+          jq -n --arg tag "$TAG" --arg body "$body" \
+            '{tag_name: $tag, name: $tag, body: $body}' > /tmp/release.json
+
+          code="$(curl -sS -o /tmp/release.out -w '%{http_code}' -X POST \
+            "${api}/releases?${auth}" \
+            -H 'Content-Type: application/json' \
+            -d @/tmp/release.json || echo 000)"
+          echo "create release -> $code"
+          cat /tmp/release.out || true
+          # 200/201 = created, 405/409 = already there (re-run). Anything else is
+          # fatal: without the release object every upload_url call returns 404,
+          # and carrying on only discovers that one file at a time. A 400
+          # "image repository" here means the tag is missing on atomgit (see the
+          # push step above).
+          case "$code" in
+            200|201) echo "created" ;;
+            405|409) echo "release already exists, reusing it" ;;
+            *)
+              echo "::error::cannot create release ${TAG} on atomgit (HTTP ${code})"
+              exit 1
+              ;;
+          esac
+
+      - name: Upload assets to atomgit
+        env:
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          UPLOAD_JOBS: '4'
+        run: |
+          set -u
+          api="https://api.atomgit.com/api/v5/repos/${OWNER}/${REPO}"
+          auth="access_token=${ATOMGIT_TOKEN}"
+          # set by upload_one when the release itself is missing, which no
+          # amount of retrying can fix
+          HARD_FAIL=/tmp/atomgit-upload-hard-fail
+          rm -f "$HARD_FAIL"
+          export api auth TAG UPLOAD_IP HARD_FAIL
+
+          upload_one() {
+            file="$1"
+            name="$(basename "$file")"
+            size="$(wc -c < "$file" | tr -d ' ')"
+            # budget the transfer at ~1MB/s: anything slower is a bad route, let
+            # --max-time kill it so the next attempt can try a different one.
+            # (curl's --speed-limit only applies to downloads, so we cannot use it)
+            budget=$((size / 1000000 + 30))
+
+            attempt=1
+            while [ "$attempt" -le 4 ]; do
+              # Keep the status code so a 404 (no such release) can be told
+              # apart from a transient failure. A 404 is permanent.
+              uu="$(mktemp)"
+              code="$(curl -sS -o "$uu" -w '%{http_code}' \
+                "${api}/releases/${TAG}/upload_url?${auth}&file_name=${name}" \
+                || echo 000)"
+              if [ "$code" = "404" ]; then
+                rm -f "$uu"
+                echo "::error::release ${TAG} does not exist on atomgit (upload_url -> 404)"
+                : > "$HARD_FAIL"
+                return 1
+              fi
+              if [ "$code" != "200" ]; then
+                rm -f "$uu"
+                echo "::warning::no upload url for ${name} (attempt ${attempt}, HTTP ${code})"
+                sleep 10
+                attempt=$((attempt + 1))
+                continue
+              fi
+              info="$(cat "$uu")"
+              rm -f "$uu"
+              url="$(printf '%s' "$info" | jq -r '.url')"
+              host="$(printf '%s' "$url" | sed -E 's#^https?://([^/]+).*#\1#')"
+              hdr="$(mktemp)"
+              printf '%s' "$info" \
+                | jq -r '.headers | to_entries[] | "header = \"\(.key): \(.value)\""' > "$hdr"
+
+              case "$attempt" in
+                1|3) set -- --resolve "${host}:443:${UPLOAD_IP}" --http1.1 ;;
+                2)   set -- --http1.1 ;;
+                *)   set -- ;;
+              esac
+              echo "start ${name} (${size}B, budget ${budget}s), attempt ${attempt}"
+
+              if curl -sSf -X PUT "$url" -K "$hdr" \
+                  --data-binary "@${file}" \
+                  -H 'Expect:' \
+                  --connect-timeout 20 \
+                  --max-time "$budget" \
+                  "$@" \
+                  -w '  -> %{http_code} in %{time_total}s (%{speed_upload} B/s)\n'; then
+                rm -f "$hdr"
+                echo "ok   ${name}"
+                return 0
+              fi
+              rm -f "$hdr"
+              echo "::warning::upload failed/slow for ${name} (attempt ${attempt}), next route"
+              sleep 5
+              attempt=$((attempt + 1))
+            done
+            echo "::error::giving up on ${name}"
+            return 1
+          }
+          export -f upload_one
+
+          # skip the auto generated source archives, smallest first so the
+          # attachment list starts filling immediately and a bad route shows up
+          # early instead of after the big universal APK
+          local_files() {
+            find ./release-assets -type f \
+              ! -name "${TAG}.tar.gz" \
+              ! -name "${TAG}.zip" \
+              -exec ls -l {} + \
+              | sort -k5 -n | awk '{print $NF}'
+          }
+          # names atomgit already has; only type=attach counts -- the "source"
+          # entries are generated by atomgit itself and are not our files
+          remote_names() {
+            curl -sS "${api}/releases/${TAG}?${auth}" \
+              | jq -r '(.assets // [])[] | select(.type == "attach") | .name'
+          }
+
+          # The PUT can return 200 from the OBS gateway while the attachment is
+          # never registered, so loop until every local file shows up.
+          round=1
+          while [ "$round" -le 3 ]; do
+            remote_names > /tmp/remote.txt || true
+            local_files | while read -r f; do
+              base="$(basename "$f")"
+              grep -qxF "$base" /tmp/remote.txt || echo "$f"
+            done > /tmp/todo.txt
+            todo="$(grep -c . /tmp/todo.txt || true)"
+            if [ "$todo" -eq 0 ]; then
+              echo "--- all files registered after round $((round - 1))"
+              break
+            fi
+            echo "--- round ${round}: ${todo} file(s) to upload"
+            xargs -r -P "${UPLOAD_JOBS}" -I {} bash -c 'upload_one "$@"' _ {} \
+              < /tmp/todo.txt || echo "::warning::some uploads failed in round ${round}"
+            # a soft failure (one flaky PUT) deserves another round; a missing
+            # release does not
+            if [ -e "$HARD_FAIL" ]; then
+              echo "::error::aborting: release ${TAG} is missing on atomgit"
+              exit 1
+            fi
+            round=$((round + 1))
+          done
+          echo "--- attach assets on atomgit now: $(remote_names | grep -c . || true)"
+
+      - name: Verify
+        env:
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -eu
+          api="https://api.atomgit.com/api/v5/repos/${OWNER}/${REPO}"
+          res="$(curl -sS "${api}/releases/${TAG}?access_token=${ATOMGIT_TOKEN}&temp_download_url=true")"
+          echo "$res" | jq -r '(.assets // [])[] | select(.type == "attach") | "\(.name) -> \(.browser_download_url)"'
+          have="$(echo "$res" | jq -r '(.assets // [])[] | select(.type == "attach") | .name' | sort)"
+          n="$(printf '%s\n' "$have" | grep -c . || true)"
+
+          # compare by name, not by count: atomgit adds source archives the
+          # github release never had, so a plain count never matches
+          want="$(find ./release-assets -type f \
+            ! -name "${TAG}.tar.gz" ! -name "${TAG}.zip" \
+            -exec basename {} \; | sort)"
+          w="$(printf '%s\n' "$want" | grep -c . || true)"
+          missing="$(comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$have"))"
+
+          echo "atomgit attach assets: $n / github assets: $w"
+          echo "https://atomgit.com/${OWNER}/${REPO}/releases"
+          if [ -n "$missing" ]; then
+            echo "::error::missing on atomgit:"
+            printf '%s\n' "$missing"
+            exit 1
+          fi
+          echo "all ${w} assets verified on atomgit"
+
+      # Drop every release except the one we just synced. This MUST run after
+      # Verify -- only ever destroy the old copy once the new one is good.
+      # (On the electerm repo this step once ran before the upload and cost a
+      # full 4.4GB release.)
+      #
+      # Note a DELETE returning 500 means it did NOT take; only 204 is a real
+      # delete.
+      - name: Clean previously synced releases
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.keep_previous }}
+        env:
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -u
+          api="https://api.atomgit.com/api/v5/repos/${OWNER}/${REPO}"
+          auth="access_token=${ATOMGIT_TOKEN}"
+
+          curl -sS "${api}/releases?${auth}&per_page=100" \
+            | jq -r '.[].tag_name' | while read -r old; do
+            [ -n "$old" ] || continue
+            [ "$old" = "$TAG" ] && continue
+            echo "--- cleaning $old"
+            # only type=attach has an id; the generated source archives have
+            # none and are skipped by jq (their id is null -> DELETE would 400)
+            curl -sS "${api}/releases/${old}?${auth}" \
+              | jq -r '(.assets // [])[] | select(.type == "attach") | "\(.id) \(.name)"' \
+              | while read -r id name; do
+              [ -n "$id" ] && [ "$id" != "null" ] || continue
+              code="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+                "${api}/releases/${old}/attach_files/${id}?${auth}" || echo 000)"
+              echo "  rm attachment $name ($id) -> $code"
+            done
+            # DELETE /releases/:tag is 405 Method Not Allowed -- the release
+            # object itself cannot be removed, only emptied
+            echo "  (release $old kept, its attachments are gone)"
+          done
