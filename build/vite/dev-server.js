@@ -141,6 +141,19 @@ async function createServer () {
       hmr: {
         overlay: true,
         port: env.DEV_HMR_PORT || 23589
+      },
+      // Vite watches the whole root, so the runtime state written while this
+      // server runs (sqlite db, app log, uploads, user widgets) would otherwise
+      // go through the watcher on every write. None of it is imported by the
+      // bundle, so ignoring it costs no HMR. Absolute paths rather than
+      // '**/data/**', so a nested `data` dir elsewhere (a dependency's test
+      // fixture, say) stays watched. `data1` is the same kind of gitignored
+      // runtime dir, kept here so a DB_PATH=./data1 run is quiet too.
+      watch: {
+        ignored: [
+          resolve(cwd, 'data'),
+          resolve(cwd, 'data1')
+        ]
       }
     },
     appType: 'custom'

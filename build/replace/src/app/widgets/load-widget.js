@@ -14,7 +14,8 @@
 // Keep the export list in sync with src/app/widgets/load-widget.js: run-sync.js
 // imports this API BY NAME, and a missing export is a link-time failure at
 // launch ("does not provide an export named ..."), not a soft error. That is
-// what happened when upstream added callWidgetFunc/importWidget/deleteWidget.
+// what happened when upstream added callWidgetFunc/importWidget/deleteWidget,
+// and again in 5.8.0 with importWidgetFromSource (git-host widget install).
 //
 // Not registered here: widget-ssh-server. It imports node-pty, which is not in
 // this package's dependencies (no native build for the Android runtime);
@@ -32,11 +33,13 @@ import {
   resolveUserWidgetEntry,
   isUserWidget,
   importWidget as importUserWidget,
+  importWidgetFromSource as importUserWidgetFromSource,
   removeUserWidget,
   importUserWidgetModule,
   getUserWidgetDir
 } from './user-widget.js'
 import { isValidWidgetId } from './paths.js'
+import { sanitizeAIConfig } from './ai-config.js'
 
 // Registry maps widget ID → module. Add new widgets here.
 const widgetRegistry = {
@@ -192,7 +195,11 @@ async function runWidget (widgetId, config) {
         instanceId: instance.instanceId,
         widgetId,
         singleInstance: !!singleInstance,
-        ...result
+        ...result,
+        // A widget may offer an AI config for the user to apply; it is
+        // sanitised here, on the way out of the main process, so the renderer
+        // only ever sees the whitelisted fields (see ./ai-config.js).
+        aiConfig: sanitizeAIConfig(result && result.aiConfig)
       }
     })
     .catch((err) => {
@@ -263,12 +270,28 @@ async function callWidgetFunc (widgetId, funcName, ...args) {
   ) {
     throw new Error(`Widget ${widgetId} does not export the function ${funcName}`)
   }
-  return widget[funcName](...args)
+  const result = await widget[funcName](...args)
+  // same offer as a run result, same sanitising (see ./ai-config.js)
+  if (
+    result &&
+    typeof result === 'object' &&
+    !Array.isArray(result) &&
+    Object.prototype.hasOwnProperty.call(result, 'aiConfig')
+  ) {
+    return { ...result, aiConfig: sanitizeAIConfig(result.aiConfig) }
+  }
+  return result
 }
 
 // Install: copy a whole widget folder into <data dir>/widgets/<id>/
 function importWidget (srcDir, overwrite) {
   return importUserWidget(srcDir, overwrite)
+}
+
+// Install from a git host: `owner/repo`, a GitHub/AtomGit URL, `owner/repo#ref`
+// or a folder inside the repo (see ./widget-source.js)
+function importWidgetFromUrl (input, overwrite) {
+  return importUserWidgetFromSource(input, overwrite)
 }
 
 // Uninstall: stop whatever it is running, then delete the folder.
@@ -333,6 +356,7 @@ export {
   runWidgetFunc,
   callWidgetFunc,
   importWidget,
+  importWidgetFromUrl as importWidgetFromSource,
   deleteWidget,
   resolveWidgetModule
 }
