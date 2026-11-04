@@ -117,6 +117,38 @@ jobs:
             -J-Duser.language=en -J-Duser.country=US \
             | grep -E "Alias name|Owner|SHA256:" | tee keystore-info.txt
 
+      - name: Set versionCode / versionName
+        # Same step as build-android.yml, so the APK carries the real version
+        # instead of the Capacitor template's hardcoded 1 / "1.0".
+        id: version
+        run: |
+          node build/android/scripts/set-version.mjs \
+            build/android/android/app/build.gradle
+          {
+            echo "version=$(node -p "require('./package.json').version")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure per-ABI APK splits
+        # Without splits the build produces one ~160MB universal APK. Google
+        # only needs the signature for verification, so build per-ABI and pick
+        # the smallest one — that keeps the upload to Play Console quick.
+        # Same block as build-android.yml injects.
+        run: |
+          GRADLE=build/android/android/app/build.gradle
+          grep -q 'splits' "$GRADLE" || printf '%s\n' \
+            '' \
+            '// electerm: split per ABI (injected by CI)' \
+            'android {' \
+            '    splits {' \
+            '        abi {' \
+            '            enable true' \
+            '            reset()' \
+            "            include 'arm64-v8a', 'armeabi-v7a', 'x86_64'" \
+            '            universalApk false' \
+            '        }' \
+            '    }' \
+            '}' >> "$GRADLE"
+
       - name: Cache Gradle distribution
         uses: actions/cache@v4
         with:
@@ -139,12 +171,38 @@ jobs:
             -Pandroid.injected.signing.key.alias="$ANDROID_RELEASE_KEY_ALIAS" \
             -Pandroid.injected.signing.key.password="$ANDROID_RELEASE_KEY_PASSWORD"
 
+      - name: Rename the verification APK
+        # Follow the release naming convention (electerm-android-{arch}-{version})
+        # so the file is recognisable, with an "-adi-verification" suffix so it
+        # can never be mistaken for a publishable build.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          APKROOT=build/android/android/app/build/outputs/apk
+          NAMED="$APKROOT/named"
+          mkdir -p "$NAMED"
+          for apk in "$APKROOT/release"/*.apk; do
+            [ -f "$apk" ] || continue
+            name=$(basename "$apk")
+            arch=$(printf '%s' "$name" | grep -oE 'arm64-v8a|armeabi-v7a|x86_64|universal' | head -1)
+            [ -z "$arch" ] && arch=universal
+            out="electerm-android-$arch-$VERSION-adi-verification.apk"
+            cp "$apk" "$NAMED/$out"
+            echo "  release/$name -> named/$out"
+          done
+          echo "=== named APKs ==="
+          ls -la "$NAMED/"
+
       - name: Verify the APK
         # Fail fast if the snippet did not make it in, or if the APK is signed
         # with a key other than the registered one.
         run: |
-          APK=build/android/android/app/build/outputs/apk/release/app-arm64-v8a-release.apk
-          test -f "$APK" || { echo "FATAL: $APK not produced"; exit 1; }
+          # Verify the arm64 build — it is the one a reviewer is most likely
+          # to install, and it is always present when splits are on.
+          APK=$(ls build/android/android/app/build/outputs/apk/named/*arm64-v8a*.apk 2>/dev/null | head -1)
+          [ -n "$APK" ] || APK=$(ls build/android/android/app/build/outputs/apk/named/*.apk | head -1)
+          test -n "$APK" || { echo "FATAL: no renamed APK found"; exit 1; }
+          echo "APK: $APK ($(du -h "$APK" | cut -f1))"
 
           unzip -p "$APK" assets/adi-registration.properties \
             || { echo "FATAL: adi-registration.properties missing from the APK"; exit 1; }
@@ -158,10 +216,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: adi-verification-apk
-          path: build/android/android/app/build/outputs/apk/release/app-arm64-v8a-release.apk
+          path: build/android/android/app/build/outputs/apk/named/*.apk
           if-no-files-found: error
           retention-days: 7
-
       - name: Summarise
         run: |
           {
