@@ -204,6 +204,52 @@ keytool -export -rfc \
 （密码管理器、离线备份、当初那台机器）。这密钥是 2026-07-17 前后创建的，
 应该还能找到。
 
+### 那个页面在哪（2026 年新版界面）
+
+> ⚠️ 网上老文档写的 **版本 → 设置 → 应用签名** 已经改位置了。
+> 旧的「应用完整性」页被 **Protected with Play** 取代，旧书签会 404。
+
+**路径 A — 首次上传时（你现在的情况）**
+
+```
+Play Console → 选中 electerm
+  → 测试和发布 → 测试 → 内部测试 → 创建新版本
+  → 点「选择签名密钥」→ 选「使用其他密钥」
+  → 「应用签名偏好设置」→ 从 Java 密钥库导出并上传密钥
+```
+
+> 新应用在选签名密钥之前，**上传按钮是灰的**——必须先过这步才能传 AAB。
+> 所以这个页面不用刻意去找，跟着第一次上传的流程走就会撞上。
+
+在这个面板上有两个下载按钮：
+
+| 按钮 | 得到什么 |
+|---|---|
+| **下载加密公钥** | `encryption_public_key.pem`（每个应用都不同） |
+| **下载 PEPK 工具** | `pepk.jar` |
+
+面板上还会直接显示官方给的命令，把参数换成你的即可：
+
+```bash
+java -jar pepk.jar --keystore=foo.keystore --alias=foo \
+  --output=output.zip --include-cert --rsa-aes-encryption \
+  --encryption-key-path=/path/to/encryption_public_key.pem
+```
+
+最后把生成的 zip 拖到**「上传生成的 ZIP 文件」**。
+
+**路径 B — 已经进过那个页面之后**
+
+```
+左侧菜单 → Protected with Play → Play Store protection → Play App Signing
+  → Manage Play app signing → Change key
+```
+
+也可以在版本创建页的「应用完整性」区直接点**「更改签名密钥」**。
+
+> 一个时效限制：应用签名密钥只能在进入 **open testing 或 production**
+> 之前更改。已经发布到正式版后就只能走 Google 的受控升级流程了。
+
 ### 找不到时的替代方案：用 CI 直接做 PEPK 导出
 
 **不需要**把 keystore 弄到本地。仓库里加了一个
@@ -213,19 +259,15 @@ keytool -export -rfc \
 - **明文 keystore 不会进入 artifact**，只有加密后的产物会
 - 产物正是 Play Console 要的那两个文件
 
-需要的额外 secret：
+### 怎么用
 
-```bash
-# 从 Play Console 的 "Upload a new app signing key from Java Keystore"
-# 页面下载 encryption_public_key.pem，转成 base64 存进去
-base64 -i encryption_public_key.pem | tr -d '\n' > /tmp/ek.txt
-gh secret set PLAY_ENCRYPTION_KEY_B64 < /tmp/ek.txt
-```
+1. 在 Play Console 的 **「Upload a new app signing key from Java Keystore」**
+   页面（路径见上一节）下载 `encryption_public_key.pem`
+2. 手动触发 workflow，把该文件**内容**（含 `-----BEGIN PUBLIC KEY-----`
+   和 `-----END PUBLIC KEY-----` 两行）粘贴到 `encryption_public_key` 输入框
+3. 下载 artifact `play-signing-material`
 
-> `encryption_public_key.pem` 是**公钥**，存进 secret 只是为了免去每次手动上传，
-> 它本身不是敏感信息。
-
-触发后下载 artifact `play-signing-material`，得到：
+产物：
 
 | 文件 | 用途 |
 |---|---|
@@ -234,9 +276,14 @@ gh secret set PLAY_ENCRYPTION_KEY_B64 < /tmp/ek.txt
 | `upload_certificate.pem` | Play 的「Upload your upload key certificate」 |
 | `keystore-info.txt` | 密钥指纹（SHA1/SHA256） |
 
-> **关于安全性**：公开仓库的 artifact **列表**可以匿名访问，但**下载需要认证**
-> （实测匿名下载返回 401）。不过别当它安全——artifact 保留 7 天，
-> 拿到 `signing_key.zip` 就能解出你的签名私钥。用完请立刻删除 artifact。
+> **为什么用 workflow 输入而不是 secret**：`encryption_public_key.pem` 是
+> **公钥**，作用只是把你的私钥加密给 Google 解密——它本来就是公开信息，
+> 页面上下都能看到。存成 secret 反而平添一个"忘记先建 secret"的失败点。
+> 直接粘贴即可，权限也只有能触发 workflow 的人看得到。
+
+> **关于 artifact 安全性**：公开仓库的 artifact **列表**可以匿名访问，但
+> **下载需要认证**（实测匿名下载返回 401）。不过别当它安全——artifact 保留
+> 7 天，拿到 `signing_key.zip` 就能解出你的签名私钥。**用完请立刻删除 artifact**。
 
 ### 如果连 PEPK 方案也不走
 
@@ -258,7 +305,126 @@ gh secret set PLAY_ENCRYPTION_KEY_B64 < /tmp/ek.txt
 
 ---
 
-## 第 3 步：创建 Service Account（CI 自动上传用）
+## 第 3 步：注册包名（Android 开发者验证）
+
+> ⚠️ 这是**另一套流程**，跟 Play 应用签名不是一回事。2026-09-30 起所有 Play
+> 应用都必须完成包名注册，没注册的会从 Play 下架。
+>
+> 入口：Play Console → **Android 开发者验证** → **包名** 标签页
+
+### 需要上传什么
+
+取决于这个包名在 Android 上**是不是第一次出现**：
+
+| 情况 | 要什么 |
+|---|---|
+| **新包名**（Android 上从未见过） | 只需签名密钥的**公钥证书**。点「添加密钥」，粘贴证书或 SHA-256 指纹即可，**不用上传 APK** |
+| **已有包名**（有安装量） | 从「符合条件的公钥证书指纹」列表里选你的那把 → 然后还要**上传用对应私钥签名的 APK** 证明所有权 |
+
+### 怎么拿到公钥证书
+
+签名密钥的公钥证书就是 keystore 里那张 X.509 证书。两种拿法：
+
+```bash
+# 方法一：直接从 keystore 读指纹（最省事）
+keytool -list -v -keystore release.keystore -alias electerm \
+  | grep -A2 'SHA256:'
+# 输出：
+#   SHA256: 6C:4E:04:37:0B:9B:B4:6B:01:E8:CD:BD:95:45:...
+
+# 方法二：导出 PEM 证书
+keytool -exportcert -rfc -keystore release.keystore \
+  -alias electerm -file upload_certificate.pem
+```
+
+### 「符合条件的公钥」列表是哪来的
+
+你会看到 Google 列出一堆指纹让你选，**即使你从没上传过任何钥匙**。
+这不是 Play 商店的数据，而是 **Android 设备侧扫描到的安装记录**：
+
+> 用户侧载过你 GitHub Release 上的 electerm APK → Android 系统记住了那个包的
+> 签名证书 → Google 汇总后列在「符合条件的公钥」里。
+
+所以**列表里出现你 CI 那把钥匙是完全正常的**，说明有设备装过你的包。
+
+验证方法（下载已发布的 APK 读它的签名证书）：
+
+```bash
+gh release download v5.8.0 --pattern "electerm-android-arm64-v8a-5.8.0.apk"
+$ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs \
+  electerm-android-arm64-v8a-5.8.0.apk
+# Signer #1 certificate SHA-256 digest:
+#   79f5c7bde59fd83c71a2bdcb46a72cee7a2244fa70132dcb83e032faf2670a77
+```
+
+把输出的指纹（去掉冒号、转小写）跟你在 Play Console 里选的那个对比，
+一致就说明选对了。
+
+### 用 CI 来做（不用碰本地 keystore）
+
+仓库里的 `export-play-signing.yml` 现在有两种模式：
+
+| mode | 产出 | 用在哪 |
+|---|---|---|
+| `fingerprint-only`（默认） | SHA-256 指纹 + `upload_certificate.pem` | 开发者验证的「添加密钥」 |
+| `pepk-export` | `signing_key.zip` + 证书 | Play 应用签名的「使用其他密钥」 |
+
+跑 `fingerprint-only` 模式，把指纹填进「添加密钥」框即可。
+
+> **用哪把钥匙？**
+> - 如果最终**启用 Play App Signing**：注册 **Play 的 app signing key** 指纹
+>   （在 Play Console 的应用签名页面看，不是 upload key 的）
+> - 如果**不启用**（自己签名直接分发）：注册你自己的签名密钥指纹
+>
+> ⚠️ 常见坑：拿 upload key 的指纹去注册。启用 Play App Signing 后，
+> upload key 只用于上传，用户拿到的是 Play 重新签过的 APK，两者指纹不同。
+
+### 如果是「已有包名」，还要证明私钥所有权
+
+1. 在验证页面点「上传 APK」，复制它给你的 snippet
+2. 在项目里建 `app/src/main/assets/adi-registration.properties`
+   （**文件名必须完全一致**，不能有 `.txt`，必须放在 assets 目录下）
+3. 把 snippet 粘进去
+4. 用**对应的私钥**签名构建 release APK
+5. 上传这个 APK
+
+> 这个 APK 只是用来证明所有权，**不会发给任何用户**，也不用是你真正发布的那个。
+
+### 用 CI 来做（推荐）
+
+仓库里的 `build-adi-verification-apk.yml` 专门干这件事：
+
+1. 手动触发，把 snippet 粘进 `snippet` 输入框
+2. 下载 artifact `adi-verification-apk`
+3. 上传到 Play Console 那个页面
+
+它会自动：
+
+- 在 `cap sync` **之后**把 snippet 写进 `app/src/main/assets/adi-registration.properties`
+  （顺序很重要：`cap sync` 会重写 assets 目录）
+- 用 CI 里那把**真实的 release keystore** 签名（所以指纹必然是 `79f5c7bd…`）
+- 构建前打印 keystore 指纹，方便你跟 Play Console 里注册的指纹核对
+- 校验 snippet 确实进了 APK、且 APK 签名可读
+
+### ⚠️ 这会不会破坏签名一致性？
+
+**不会。** 这是两件不同的事：
+
+| | 签名是谁 | 影响谁 |
+|---|---|---|
+| **验证 APK** | 你的 release keystore | 只用来向 Google 证明你持有私钥。**不会被安装、不会上架**，签名对用户无意义 |
+| **最终上架的 AAB** | upload key 签名上传，Play 用 app signing key 重新签 | 这才决定用户看到的签名 |
+
+关键在于：**验证 APK 必须用「与已注册指纹对应的那把私钥」签名**。
+只要用的是 CI 那把 release keystore，指纹自然就是 `79f5c7bd…`，
+Google 校验通过，注册成功——**整个过程不产生任何新的签名**。
+
+> 真正需要你决策的是**第 2 步**（Play 应用签名）：用同一把钥匙注册，
+> 还是让 Google 生成一把新的。见第 2 步的取舍说明。
+
+---
+
+## 第 4 步：创建 Service Account（CI 自动上传用）
 
 ### 3.1 建服务账号
 
@@ -294,7 +460,7 @@ gh secret set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON < /path/to/service-account.json
 
 ---
 
-## 第 4 步：首次上传必须手工做
+## 第 5 步：首次上传必须手工做
 
 > **这是最容易卡住的一步。**
 > Android Publisher API 只认手工上传过的包名——没手工传过就调 API，
@@ -304,7 +470,7 @@ gh secret set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON < /path/to/service-account.json
 
 1. Play Console → 选中 electerm → **测试和发布 → 测试 → 内部测试**
 2. **创建新版本**
-3. 上传 `.aab` 文件（见第 5 步获取）
+3. 上传 `.aab` 文件（见第 6 步获取）
 4. 首次上传会引导你配置 Play 应用签名，按第 2 步的决策走
 5. 填发布说明 → **保存并发布**
 
@@ -315,7 +481,7 @@ gh secret set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON < /path/to/service-account.json
 
 ---
 
-## 第 5 步：用 CI 构建并上传
+## 第 6 步：用 CI 构建并上传
 
 ### 已完成的准备
 
@@ -432,7 +598,7 @@ cd android && ./gradlew bundleRelease
 
 ---
 
-## 第 6 步：发布到生产
+## 第 7 步：发布到生产
 
 内部测试验证没问题后：
 
@@ -452,7 +618,7 @@ cd android && ./gradlew bundleRelease
 
 ---
 
-## 第 7 步：上线后的持续发布
+## 第 8 步：上线后的持续发布
 
 之后每次发版只要改 `package.json` 的版本号，走这套流程：
 
@@ -480,7 +646,7 @@ CI 会自动用新版本号算出更大的 versionCode 并上传。
 
 | 报错 | 原因 | 解决 |
 |---|---|---|
-| `Package not found` | 没手工上传过 | 回第 4 步手工传一次 |
+| `Package not found` | 没手工上传过 | 回第 5 步手工传一次 |
 | `Version code already exists` | versionCode 没变大 | 检查 set-version.mjs 是否执行 |
 | `Target API level too low` | targetSdk < 36 | `build/android/android/variables.gradle` |
 | 16KB 对齐警告 | 32 位库未对齐 | 正常，64 位才要求 |

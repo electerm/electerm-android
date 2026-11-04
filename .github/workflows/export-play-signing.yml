@@ -1,28 +1,32 @@
 name: Export signing material for Google Play enrollment
 
-# Produces the files Google Play asks for when enrolling electerm's existing
-# signing key as the Play app signing key:
+# Two separate Play Console flows need material from the release keystore.
+# This workflow produces both, one mode at a time.
 #
-#   1. encrypted_private_key.pem   (or signing_key.zip with the cert inside)
-#      -> "Upload a new app signing key from Java Keystore" in Play Console
-#   2. upload_certificate.pem
-#      -> "Upload your upload key certificate"
+# 1. Android developer verification → "Package names" → "Add key"
+#    Needs the SHA-256 certificate fingerprint of the app signing key.
+#    Mode: fingerprint-only (default). Also emits upload_certificate.pem,
+#    which is the public certificate you can paste instead of the fingerprint.
+#
+# 2. Play App Signing → "Choose signing key" → "Use a different key"
+#    Needs the private key encrypted for Google, plus the public certificate.
+#    Mode: pepk-export. Produces signing_key.zip and upload_certificate.pem.
 #
 # The keystore never leaves the runner in plain form: it is decoded from
-# ANDROID_RELEASE_KEYSTORE_BASE64, used to produce the PEPK-encrypted export,
-# and then deleted. Only the encrypted export and the public certificate are
-# uploaded as artifacts.
+# ANDROID_RELEASE_KEYSTORE_BASE64, used to produce the export, and then
+# deleted. Only public material and the PEPK-encrypted export are uploaded.
 #
 # The PEPK encryption public key (encryption_public_key.pem) is downloaded by
-# the user from the Play Console screen; pass it in as the
-# PLAY_ENCRYPTION_KEY_B64 secret. It is a PUBLIC key and is safe to store.
+# the user from the Play Console screen and pasted into the
+# encryption_public_key workflow input. It is a PUBLIC key — it only encrypts
+# the exported private key so Google can decrypt it — so it is an input rather
+# than a secret.
 #
 # Required secrets:
 #   ANDROID_RELEASE_KEYSTORE_BASE64   base64 of the release keystore
 #   ANDROID_RELEASE_KEYSTORE_PASSWORD  keystore store password
 #   ANDROID_RELEASE_KEY_ALIAS          keystore key alias
 #   ANDROID_RELEASE_KEY_PASSWORD       key password
-#   PLAY_ENCRYPTION_KEY_B64            base64 of encryption_public_key.pem
 #
 # Artifacts of a PUBLIC repo are listed anonymously but downloading them
 # requires authentication (the API returns 401 without a token), so treat the
@@ -31,8 +35,19 @@ name: Export signing material for Google Play enrollment
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'What to produce'
+        type: choice
+        options:
+          - fingerprint-only
+          - pepk-export
+        default: fingerprint-only
+      encryption_public_key:
+        description: 'Contents of encryption_public_key.pem from the Play Console "Upload a new app signing key from Java Keystore" page (PEM text). Only used in pepk-export mode.'
+        type: string
+        default: ''
       include_cert:
-        description: 'Also emit signing_key.zip (encryptedPrivateKey + certificate.pem)'
+        description: 'Also emit signing_key.zip (encryptedPrivateKey + certificate.pem). Only used in pepk-export mode.'
         type: boolean
         default: true
 
@@ -56,21 +71,43 @@ jobs:
 
       - name: Download PEPK tool
         # Official Google-hosted copy of the Play Encrypt Private Key tool.
+        if: ${{ inputs.mode == 'pepk-export' }}
         run: |
           curl -sSL -o pepk.jar \
             "https://www.gstatic.com/play-apps-publisher-rapid/signing-tool/prod/pepk.jar"
           test -s pepk.jar || { echo "FATAL: pepk.jar download failed"; exit 1; }
           ls -la pepk.jar
 
-      - name: Decode keystore and encryption key
+      - name: Decode keystore
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
-          PLAY_ENCRYPTION_KEY_B64: ${{ secrets.PLAY_ENCRYPTION_KEY_B64 }}
         run: |
           printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > release.keystore
-          printf '%s' "$PLAY_ENCRYPTION_KEY_B64" | base64 --decode > encryption_public_key.pem
           test -s release.keystore || { echo "FATAL: keystore decode failed"; exit 1; }
-          test -s encryption_public_key.pem || { echo "FATAL: encryption key decode failed"; exit 1; }
+          echo "keystore decoded"
+
+      - name: Write encryption public key
+        # The Play encryption key is a PUBLIC key — it is displayed on the
+        # Play Console page and only serves to encrypt the exported private
+        # key for Google to decrypt. It is therefore passed in as a workflow
+        # input rather than kept as a secret: nothing confidential is involved,
+        # and a missing secret would otherwise fail the run before it starts.
+        if: ${{ inputs.mode == 'pepk-export' }}
+        env:
+          PEM: ${{ inputs.encryption_public_key }}
+        run: |
+          if [ -z "$PEM" ]; then
+            echo "::error::No encryption_public_key provided. Open the Play Console"
+            echo "::error::page 'Upload a new app signing key from Java Keystore',"
+            echo "::error::download encryption_public_key.pem, and paste its full"
+            echo "::error::contents (including the BEGIN/END lines) into the"
+            echo "::error::encryption_public_key input of this workflow."
+            exit 1
+          fi
+          printf '%s\n' "$PEM" | sed '/^[[:space:]]*$/d' > encryption_public_key.pem
+          test -s encryption_public_key.pem || { echo "FATAL: encryption key is empty"; exit 1; }
+          grep -q 'BEGIN' encryption_public_key.pem \
+            || { echo "FATAL: that does not look like a PEM file"; exit 1; }
           head -1 encryption_public_key.pem
 
       - name: Verify keystore contents
@@ -89,7 +126,33 @@ jobs:
             | tee keystore-info.txt
           test -s keystore-info.txt || { echo "FATAL: keystore-info.txt is empty"; exit 1; }
 
+      - name: Extract SHA-256 certificate fingerprint
+        # The Android developer verification page asks for the SHA-256
+        # certificate fingerprint of the app's signing key. Export the public
+        # certificate and compute the digest from it — the certificate is
+        # public, so this is safe to publish.
+        id: fingerprint
+        env:
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+        run: |
+          keytool -exportcert -rfc \
+            -keystore release.keystore \
+            -alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            -file upload_certificate.pem \
+            -storepass "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
+          test -s upload_certificate.pem || { echo "FATAL: certificate export failed"; exit 1; }
+
+          # Strip the "SHA256 Fingerprint=" prefix and any trailing newline.
+          FINGERPRINT=$(openssl x509 -in upload_certificate.pem -noout \
+            -fingerprint -sha256 | sed 's/^.*=//' | tr -d '[:space:]')
+          echo "SHA-256: $FINGERPRINT"
+          test -n "$FINGERPRINT" || { echo "FATAL: could not compute the fingerprint"; exit 1; }
+          echo "$FINGERPRINT" | tee sha256-fingerprint.txt
+          echo "fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
+
       - name: Export encrypted private key (PEPK)
+        if: ${{ inputs.mode == 'pepk-export' }}
         env:
           ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
@@ -110,7 +173,7 @@ jobs:
       - name: Export bundle with certificate
         # Play's Java-keystore enrollment expects a single ZIP holding both
         # the encrypted private key and the certificate.
-        if: ${{ inputs.include_cert }}
+        if: ${{ inputs.mode == 'pepk-export' && inputs.include_cert }}
         env:
           ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
@@ -126,20 +189,6 @@ jobs:
             --encryption-key-path=encryption_public_key.pem \
             --include-cert
           unzip -l signing_key.zip
-
-      - name: Export upload key certificate
-        # The public certificate of the upload key. Upload it in Play Console
-        # under "Upload your upload key certificate".
-        env:
-          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
-          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-        run: |
-          keytool -export -rfc \
-            -keystore release.keystore \
-            -alias "$ANDROID_RELEASE_KEY_ALIAS" \
-            -file upload_certificate.pem \
-            -storepass "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
-          head -2 upload_certificate.pem
 
       - name: Shred the keystore
         # The plain keystore is never uploaded, but drop it from the runner
@@ -157,27 +206,49 @@ jobs:
             signing_key.zip
             upload_certificate.pem
             keystore-info.txt
+            sha256-fingerprint.txt
           if-no-files-found: error
           retention-days: 7
 
       - name: Summarise
+        env:
+          MODE: ${{ inputs.mode }}
+          FINGERPRINT: ${{ steps.fingerprint.outputs.fingerprint }}
         run: |
           {
-            echo "### Play signing material exported"
+            if [ "$MODE" = "fingerprint-only" ]; then
+              echo "### SHA-256 certificate fingerprint"
+              echo ""
+              echo "Paste this into the Play Console 'Add key' field:"
+              echo ""
+              echo '```'
+              echo "$FINGERPRINT"
+              echo '```'
+              echo ""
+              echo "The public certificate (\`upload_certificate.pem\`) is in the artifact."
+            else
+              echo "### Play signing material exported"
+              echo ""
+              echo "Upload these to Play Console:"
+              echo ""
+              echo "| File | Play Console field |"
+              echo "|---|---|"
+              echo "| \`signing_key.zip\` | Upload a new app signing key from Java Keystore |"
+              echo "| \`upload_certificate.pem\` | Upload your upload key certificate |"
+              echo ""
+              echo "SHA-256 fingerprint:"
+              echo ""
+              echo '```'
+              echo "$FINGERPRINT"
+              echo '```'
+              echo ""
+              echo "> Artifacts of this public repo require authentication to"
+              echo "> download, but treat them as secrets anyway."
+            fi
             echo ""
-            echo "Upload these to Play Console:"
-            echo ""
-            echo "| File | Play Console field |"
-            echo "|---|---|"
-            echo "| \`signing_key.zip\` | Upload a new app signing key from Java Keystore |"
-            echo "| \`upload_certificate.pem\` | Upload your upload key certificate |"
-            echo ""
-            echo "Fingerprints:"
+            echo "Key details:"
             echo ""
             echo '```'
             cat keystore-info.txt
             echo '```'
-            echo ""
-            echo "> Artifacts of this public repo require authentication to"
-            echo "> download, but treat them as secrets anyway."
           } >> "$GITHUB_STEP_SUMMARY"

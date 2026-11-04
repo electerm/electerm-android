@@ -1,0 +1,181 @@
+name: Build ownership-verification APK
+
+# Builds the throwaway APK that Google Play asks for when you register an
+# EXISTING package name for Android developer verification.
+#
+# The flow is:
+#   1. On the Play Console verification page, copy the snippet it shows.
+#   2. Run this workflow with that snippet.
+#   3. Download the "adi-verification-apk" artifact and upload it there.
+#
+# The APK must be signed with the private key that matches the public
+# certificate fingerprint you registered. That is the same release keystore
+# the GitHub Release APKs are signed with (ANDROID_RELEASE_KEYSTORE_*), so the
+# signature matches the apps users already have installed.
+#
+# The snippet is written to assets/adi-registration.properties. The file name
+# must be exact and it must live in the assets folder — that is what Google
+# checks. It is added to the native project AFTER `cap sync`, because `cap
+# sync` rewrites the assets directory.
+#
+# This APK is only used to prove key ownership: it is never distributed, never
+# published, and does not affect the signature of the real app.
+
+on:
+  workflow_dispatch:
+    inputs:
+      snippet:
+        description: 'The snippet copied from the Play Console verification page (e.g. D76FWMSLEEUPSAAAAAAAAAAAAA)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build verification APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Java (JDK 21)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install required Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: ci init
+        run: npm config set legacy-peer-deps true
+
+      - name: Install root dependencies
+        run: npm i
+
+      - name: Install Capacitor dependencies
+        run: npm --prefix build/android install
+
+      - name: Build web frontend + Node.js backend bundle
+        env:
+          SERVER_SECRET: ${{ secrets.SERVER_SECRET }}
+        run: npm run build:android
+
+      - name: Add Android platform (first run only)
+        run: cd build/android && [ -d android ] || npx cap add android
+
+      - name: Sync Capacitor
+        run: cd build/android && npx cap sync android
+
+      - name: Ensure nodejs-mobile gradle variable is defined
+        run: |
+          cd build/android/android
+          grep -q "nodejsMobileVersion" variables.gradle || \
+            printf '\next.nodejsMobileVersion = "18.20.4-capawesome.1"\n' >> variables.gradle
+
+      - name: Write the verification snippet
+        # Must run AFTER `cap sync` — that step rewrites the assets directory.
+        env:
+          SNIPPET: ${{ inputs.snippet }}
+        run: |
+          ASSETS=build/android/android/app/src/main/assets
+          mkdir -p "$ASSETS"
+          printf '%s\n' "$SNIPPET" > "$ASSETS/adi-registration.properties"
+          echo "=== written ==="
+          cat "$ASSETS/adi-registration.properties"
+
+      - name: Decode keystore and print its fingerprint
+        # Show the fingerprint of the key that will sign the APK so it can be
+        # compared against the one registered in Play Console.
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+        run: |
+          KEYSTORE=build/android/android/app/release.keystore
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          keytool -list -v -keystore "$KEYSTORE" \
+            -storepass "$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            -J-Duser.language=en -J-Duser.country=US \
+            | grep -E "Alias name|Owner|SHA256:" | tee keystore-info.txt
+
+      - name: Cache Gradle distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper/dists
+          key: gradle-wrapper-${{ runner.os }}-${{ hashFiles('build/android/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-wrapper-${{ runner.os }}-
+
+      - name: Build signed verification APK
+        env:
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          cd build/android/android && chmod +x gradlew
+          KEYSTORE="$PWD/app/release.keystore"
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file="$KEYSTORE" \
+            -Pandroid.injected.signing.store.password="$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_RELEASE_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_RELEASE_KEY_PASSWORD"
+
+      - name: Verify the APK
+        # Fail fast if the snippet did not make it in, or if the APK is signed
+        # with a key other than the registered one.
+        run: |
+          APK=build/android/android/app/build/outputs/apk/release/app-arm64-v8a-release.apk
+          test -f "$APK" || { echo "FATAL: $APK not produced"; exit 1; }
+
+          unzip -p "$APK" assets/adi-registration.properties \
+            || { echo "FATAL: adi-registration.properties missing from the APK"; exit 1; }
+
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" \
+            | tee certs.txt
+          grep -q "SHA-256 digest" certs.txt \
+            || { echo "FATAL: could not read the APK signer certificate"; exit 1; }
+
+      - name: Upload the verification APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: adi-verification-apk
+          path: build/android/android/app/build/outputs/apk/release/app-arm64-v8a-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Ownership-verification APK built"
+            echo ""
+            echo "Upload \`adi-verification-apk\` to the Play Console verification page."
+            echo ""
+            echo "Signing key:"
+            echo ""
+            echo '```'
+            cat keystore-info.txt
+            echo '```'
+            echo ""
+            echo "The APK signature must match the certificate fingerprint you"
+            echo "registered. Compare the SHA-256 line above with the one in"
+            echo "Play Console."
+          } >> "$GITHUB_STEP_SUMMARY"

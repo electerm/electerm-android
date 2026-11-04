@@ -169,6 +169,36 @@ With Play App Signing:
 
 This is the standard model for Play distribution.
 
+#### Where the app signing key page is (2026 console layout)
+
+The old **Test and release → App integrity** page is gone — it was replaced by
+**Protected with Play**, so old bookmarks 404.
+
+For a first upload (a brand-new app), the upload button stays greyed out until a
+signing key is chosen, so the page appears on its own:
+
+```
+Play Console → your app
+  → Test and release → Testing → Internal testing → Create new release
+  → "Choose signing key" → "Use a different key"
+  → "Export and upload a key from Java keystore"
+```
+
+That panel has two download buttons: **Download encryption public key**
+(`encryption_public_key.pem`, different for every app) and **Download PEPK tool**
+(`pepk.jar`). It also shows the exact command to run. Upload the resulting ZIP
+to **"Upload generated ZIP"**.
+
+Once you have been through that page:
+
+```
+Protected with Play → Play Store protection → Play App Signing
+  → Manage Play app signing → Change key
+```
+
+The app signing key can only be changed before the app reaches open testing or
+production.
+
 > **Key continuity matters here.** The keystore in `ANDROID_RELEASE_KEYSTORE_BASE64`
 > is what every GitHub Release APK is signed with. If Play generates its own app
 > signing key, the Play-installed app has a **different signature** than the
@@ -349,13 +379,10 @@ for when enrolling an existing signing key:
 
 It decodes the keystore from `ANDROID_RELEASE_KEYSTORE_BASE64` on the runner,
 runs the official PEPK tool, and deletes the plain keystore, so no cleartext key
-ever reaches an artifact. It needs one extra secret, the public encryption key
-downloaded from the Play Console screen:
-
-```bash
-base64 -i encryption_public_key.pem | tr -d '\n' > /tmp/ek.txt
-gh secret set PLAY_ENCRYPTION_KEY_B64 < /tmp/ek.txt
-```
+ever reaches an artifact. Download `encryption_public_key.pem` from the Play
+Console page and paste its contents into the `encryption_public_key` workflow
+input — it is a public key (it only encrypts your private key for Google to
+decrypt), so an input is a better fit than a secret.
 
 Artifacts of a public repo are listed anonymously but downloading them requires
 authentication (the API returns 401 without a token). Treat the artifact as a
