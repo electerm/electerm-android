@@ -581,7 +581,7 @@ function applyResOverlay () {
   if (fs.existsSync(javaSrcDir)) {
     const javaDestDir = path.resolve(mainDir, 'java')
     copyDir(javaSrcDir, javaDestDir)
-    console.log('[android] wrote MainActivity.java →', javaDestDir)
+    console.log('[android] wrote java sources →', javaDestDir)
   }
 
   // Copy every *other* entry (drawable, mipmap-*, values, xml, …) into res/.

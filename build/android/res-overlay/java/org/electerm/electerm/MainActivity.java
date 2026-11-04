@@ -30,9 +30,11 @@ import com.getcapacitor.BridgeActivity;
  * silently falls back to its web implementation (a no-op in a WebView). Anything
  * that must reach native is a plain @JavascriptInterface object attached here:
  *
- *   window.ElectermNative  {@link ElectermSaveBridge}    - public Downloads save
- *   window.ElectermChrome  {@link ElectermWindowChrome}  - system-bar colours
- *                                                          from the UI theme
+ *   window.ElectermNative        {@link ElectermSaveBridge}      - public Downloads save
+ *   window.ElectermChrome        {@link ElectermWindowChrome}    - system-bar colours
+ *                                                                  from the UI theme
+ *   window.ElectermInstallSource {@link ElectermInstallSource}   - who installed the
+ *                                                                  app (Play vs sideload)
  */
 public class MainActivity extends BridgeActivity {
 
@@ -87,6 +89,10 @@ public class MainActivity extends BridgeActivity {
         if (windowChrome != null) {
             webView.addJavascriptInterface(windowChrome, "ElectermChrome");
         }
+        webView.addJavascriptInterface(
+            new ElectermInstallSource(getApplicationContext()),
+            "ElectermInstallSource"
+        );
     }
 
     /**

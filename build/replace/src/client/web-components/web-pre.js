@@ -40,6 +40,36 @@ function decodeBase64String (base64String) {
 
 window.log = window.console
 
+// Android only: is this the Google Play build?
+//
+// The GitHub/APK build self-checks for updates and then sends the user to a new
+// APK on electerm.org; the Play build must not (Play owns updates there, and
+// Play policy forbids steering users to a download outside the store). Both
+// build from the *same* web bundle — publish-google-play.yml runs the same
+// `npm run build:android` — so the answer cannot be baked into index.html at
+// build time. It is a property of how the app got onto the device, and
+// PackageManager knows it: `window.ElectermInstallSource` (see
+// ElectermInstallSource.java) reports the installer package, `com.android.vending`
+// for Google Play.
+//
+// `disableUpgradeCheck` is the same switch desktop builds use to hide the whole
+// upgrade flow: upgrade.jsx never registers itself (so the auto check on start
+// and the sys-menu entry become no-ops) and info-modal.jsx drops its "check for
+// update" button.
+//
+// Absent on a plain browser (dev server), where the check stays on as before.
+const installSource = window.ElectermInstallSource
+if (installSource && typeof installSource.isPlayInstall === 'function') {
+  try {
+    if (installSource.isPlayInstall()) {
+      window.et.disableUpgradeCheck = true
+    }
+  } catch (e) {
+    // Bridge call failed — leave the updater alone rather than silently
+    // disabling it for sideloaded users.
+  }
+}
+
 // Fallback clipboard copy using execCommand, for Android WebView where
 // navigator.clipboard.writeText() may fail silently (non-secure http
 // scheme, missing user-gesture context from antd Dropdown menu clicks,
