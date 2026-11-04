@@ -1,0 +1,183 @@
+name: Export signing material for Google Play enrollment
+
+# Produces the files Google Play asks for when enrolling electerm's existing
+# signing key as the Play app signing key:
+#
+#   1. encrypted_private_key.pem   (or signing_key.zip with the cert inside)
+#      -> "Upload a new app signing key from Java Keystore" in Play Console
+#   2. upload_certificate.pem
+#      -> "Upload your upload key certificate"
+#
+# The keystore never leaves the runner in plain form: it is decoded from
+# ANDROID_RELEASE_KEYSTORE_BASE64, used to produce the PEPK-encrypted export,
+# and then deleted. Only the encrypted export and the public certificate are
+# uploaded as artifacts.
+#
+# The PEPK encryption public key (encryption_public_key.pem) is downloaded by
+# the user from the Play Console screen; pass it in as the
+# PLAY_ENCRYPTION_KEY_B64 secret. It is a PUBLIC key and is safe to store.
+#
+# Required secrets:
+#   ANDROID_RELEASE_KEYSTORE_BASE64   base64 of the release keystore
+#   ANDROID_RELEASE_KEYSTORE_PASSWORD  keystore store password
+#   ANDROID_RELEASE_KEY_ALIAS          keystore key alias
+#   ANDROID_RELEASE_KEY_PASSWORD       key password
+#   PLAY_ENCRYPTION_KEY_B64            base64 of encryption_public_key.pem
+#
+# Artifacts of a PUBLIC repo are listed anonymously but downloading them
+# requires authentication (the API returns 401 without a token), so treat the
+# artifact as a secret anyway: it can decrypt into your signing key.
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_cert:
+        description: 'Also emit signing_key.zip (encryptedPrivateKey + certificate.pem)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: Export Play signing material
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java (JDK 21)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Download PEPK tool
+        # Official Google-hosted copy of the Play Encrypt Private Key tool.
+        run: |
+          curl -sSL -o pepk.jar \
+            "https://www.gstatic.com/play-apps-publisher-rapid/signing-tool/prod/pepk.jar"
+          test -s pepk.jar || { echo "FATAL: pepk.jar download failed"; exit 1; }
+          ls -la pepk.jar
+
+      - name: Decode keystore and encryption key
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          PLAY_ENCRYPTION_KEY_B64: ${{ secrets.PLAY_ENCRYPTION_KEY_B64 }}
+        run: |
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > release.keystore
+          printf '%s' "$PLAY_ENCRYPTION_KEY_B64" | base64 --decode > encryption_public_key.pem
+          test -s release.keystore || { echo "FATAL: keystore decode failed"; exit 1; }
+          test -s encryption_public_key.pem || { echo "FATAL: encryption key decode failed"; exit 1; }
+          head -1 encryption_public_key.pem
+
+      - name: Verify keystore contents
+        env:
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+        run: |
+          # keytool's output is localized, so pin the locale to English before
+          # grepping for field names — otherwise the summary ends up empty on
+          # a runner configured for another language.
+          keytool -list -v -keystore release.keystore \
+            -storepass "$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            -J-Duser.language=en -J-Duser.country=US \
+            | grep -E "Alias name|Owner|Valid from|SHA1:|SHA256:" \
+            | tee keystore-info.txt
+          test -s keystore-info.txt || { echo "FATAL: keystore-info.txt is empty"; exit 1; }
+
+      - name: Export encrypted private key (PEPK)
+        env:
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          java -jar pepk.jar \
+            --keystore release.keystore \
+            --alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            --output=encrypted_private_key.pem \
+            --keystore-pass "$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
+            --key-pass "$ANDROID_RELEASE_KEY_PASSWORD" \
+            --rsa-aes-encryption \
+            --encryption-key-path=encryption_public_key.pem
+          test -s encrypted_private_key.pem \
+            || { echo "FATAL: PEPK export produced nothing"; exit 1; }
+          ls -la encrypted_private_key.pem
+
+      - name: Export bundle with certificate
+        # Play's Java-keystore enrollment expects a single ZIP holding both
+        # the encrypted private key and the certificate.
+        if: ${{ inputs.include_cert }}
+        env:
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          java -jar pepk.jar \
+            --keystore release.keystore \
+            --alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            --output=signing_key.zip \
+            --keystore-pass "$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
+            --key-pass "$ANDROID_RELEASE_KEY_PASSWORD" \
+            --rsa-aes-encryption \
+            --encryption-key-path=encryption_public_key.pem \
+            --include-cert
+          unzip -l signing_key.zip
+
+      - name: Export upload key certificate
+        # The public certificate of the upload key. Upload it in Play Console
+        # under "Upload your upload key certificate".
+        env:
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+        run: |
+          keytool -export -rfc \
+            -keystore release.keystore \
+            -alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            -file upload_certificate.pem \
+            -storepass "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
+          head -2 upload_certificate.pem
+
+      - name: Shred the keystore
+        # The plain keystore is never uploaded, but drop it from the runner
+        # anyway so it cannot end up in a cached or archived workspace.
+        run: |
+          rm -f release.keystore
+          test ! -e release.keystore && echo "keystore removed from the runner"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: play-signing-material
+          path: |
+            encrypted_private_key.pem
+            signing_key.zip
+            upload_certificate.pem
+            keystore-info.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Play signing material exported"
+            echo ""
+            echo "Upload these to Play Console:"
+            echo ""
+            echo "| File | Play Console field |"
+            echo "|---|---|"
+            echo "| \`signing_key.zip\` | Upload a new app signing key from Java Keystore |"
+            echo "| \`upload_certificate.pem\` | Upload your upload key certificate |"
+            echo ""
+            echo "Fingerprints:"
+            echo ""
+            echo '```'
+            cat keystore-info.txt
+            echo '```'
+            echo ""
+            echo "> Artifacts of this public repo require authentication to"
+            echo "> download, but treat them as secrets anyway."
+          } >> "$GITHUB_STEP_SUMMARY"

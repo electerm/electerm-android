@@ -139,6 +139,32 @@ jobs:
           rm -f "$RES/values/ic_launcher_background.xml"
           find "$RES" -type f -name 'splash.png' -path '*/drawable*' -delete
 
+      - name: Set versionCode / versionName
+        # Capacitor's template hardcodes versionCode 1 / versionName "1.0", so
+        # without this every APK would report itself as version 1.0 to Android
+        # (Settings → Apps, `dumpsys package`, and any app that reads
+        # PackageInfo.versionName). Take the real version from package.json —
+        # the same source the release filenames use — and map it to a
+        # monotonically increasing versionCode:
+        #   versionCode = major * 1000000 + minor * 1000 + patch
+        #   5.8.0 -> 5008000
+        # Play requires versionCode to increase with every upload and rejects
+        # duplicates, so this also makes the GitHub-release APKs uploadable to
+        # Google Play without a second versioning scheme.
+        #
+        # This must run BEFORE the splits step below: both edit the same
+        # app/build.gradle, and the splits block is appended to the end of the
+        # file while this rewrites the version lines near the top.
+        id: version
+        run: |
+          node build/android/scripts/set-version.mjs \
+            build/android/android/app/build.gradle
+          grep -E "versionCode|versionName" build/android/android/app/build.gradle
+          {
+            echo "version=$(node -p "require('./package.json').version")"
+            echo "version_code=$(node -e "const[a,b,c]='$(node -p "require('./package.json').version")'.split('.').map(Number);console.log(a*1000000+b*1000+c)")"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Configure per-ABI APK splits
         # Produce one APK per architecture (arm64-v8a, armeabi-v7a, x86_64)
         # plus a universal build, instead of a single ~160MB universal blob.
@@ -193,14 +219,16 @@ jobs:
             -Pandroid.injected.signing.key.password="$ANDROID_RELEASE_KEY_PASSWORD"
 
       - name: Rename APKs to electerm-android-{arch}-{version}.apk
-        # Version comes from package.json. Each per-ABI release APK is renamed
-        # to electerm-android-{arch}-{version}.apk. The {arch} is parsed from
+        # The version comes from the "Set versionCode / versionName" step, which
+        # is the single source of truth for this run (it read package.json).
+        # Each per-ABI release APK is renamed to
+        # electerm-android-{arch}-{version}.apk. The {arch} is parsed from
         # gradle's per-ABI output filename; falls back to "universal" for the
         # universal build (or if splits are off).
         id: rename
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           APKROOT=build/android/android/app/build/outputs/apk
           mkdir -p "$APKROOT/named"
           dir="$APKROOT/release"
@@ -228,7 +256,7 @@ jobs:
       - name: Delete existing release + tag (if re-run for same version)
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.rename.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           TAG="v${VERSION}"
           echo "Checking for existing release/tag: $TAG"
@@ -237,7 +265,7 @@ jobs:
       - name: Create draft release and upload APK assets
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.rename.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           TAG="v${VERSION}"
           APKROOT=build/android/android/app/build/outputs/apk/named
@@ -296,7 +324,7 @@ jobs:
         # With GITHUB_TOKEN those downstream workflows stay silent.
         env:
           GH_TOKEN: ${{ secrets.PAT_REPO_TOKEN }}
-          VERSION: ${{ steps.rename.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           TAG="v${VERSION}"
           gh release edit "$TAG" \
