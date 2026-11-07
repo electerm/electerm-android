@@ -70,6 +70,9 @@ export function buildViewData (opts = {}) {
     versionFile: 'version-android.html',
     downloadUpgradeFromBrowser: true,
     extIconPath: cdn + extIconPath,
+    // where a bookmark icon downloaded into <data dir>/icons is served from
+    // (routes/icon.js), a constant of the app rather than of the device
+    iconServePath: '/api/icon/',
     cdn,
     query: opts.query || {},
     server: opts.server || '',
@@ -80,7 +83,7 @@ export function buildViewData (opts = {}) {
   }
   // Runtime-only values. Omitted from the build-time page on purpose: see the
   // header comment. `undefined` here means "not known yet", not "empty".
-  for (const key of ['home', 'sessionLogPath', 'widgetLogPath', 'tokenElecterm']) {
+  for (const key of ['home', 'sessionLogPath', 'widgetLogPath', 'iconDir', 'tokenElecterm']) {
     if (opts[key] !== undefined) {
       data[key] = opts[key]
     }

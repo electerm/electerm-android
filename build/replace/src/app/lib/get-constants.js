@@ -10,6 +10,7 @@ import _ from 'lodash'
 import { sep } from 'path'
 import { getConfig } from './init.js'
 import { logDir } from '../server/session-log.js'
+import { getIconDir } from './icon-download.js'
 import copy from 'json-deep-copy'
 const allowList = new Set([
   'SHELL', 'TERM', 'TERM_PROGRAM', 'TERM_PROGRAM_VERSION', 'COLORTERM',
@@ -82,6 +83,9 @@ export async function getConstants (req, res) {
     // (lib/view.js still ships it in a dev render). Same value the terminal
     // used to read from window.et.sessionLogPath.
     sessionLogPath: logDir,
+    // same reason: the folder a downloaded bookmark icon is served from
+    // (routes/icon.js), so the client can turn a stored path into a url
+    iconDir: getIconDir(),
     transferKeys
   }
   res.send(
