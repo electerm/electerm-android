@@ -1,6 +1,6 @@
 {
   "name": "electerm-android",
-  "version": "5.9.0",
+  "version": "5.9.1",
   "description": "electerm for Android — a free and open-source ssh/sftp/telnet/RDP/VNC/Spice/ftp client, built on the electerm-web codebase with Capacitor.",
   "main": "src/app/app.js",
   "type": "module",
@@ -20,8 +20,9 @@
     "lock": "npm i --package-lock-only",
     "r": "./build/bin/release",
     "d": "./build/bin/dev",
-    "test": "npm run test:integration && npm run test:src",
+    "test": "npm run test:integration && npm run test:mirror && npm run test:src",
     "test:integration": "node --test test/integration/mcp.spec.js",
+    "test:mirror": "node --test test/download-mirror.spec.js",
     "test:src": "node --test test/src.spec.js",
     "gen:index": "node build/bin/gen-index-html.js"
   },
