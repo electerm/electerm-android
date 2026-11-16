@@ -15,19 +15,29 @@
 // imports this API BY NAME, and a missing export is a link-time failure at
 // launch ("does not provide an export named ..."), not a soft error. That is
 // what happened when upstream added callWidgetFunc/importWidget/deleteWidget,
-// and again in 5.8.0 with importWidgetFromSource (git-host widget install),
-// and in 5.10.0 with importWidgetFromRegistry (widgets.electerm.org install).
+// again in 5.8.0 with importWidgetFromSource (git-host widget install),
+// 5.10.0 with importWidgetFromRegistry (widgets.electerm.org install), and
+// 5.11.8 with listWidgetInstances/runningCss/broadcastCss (widget css bus,
+// instance list a reloaded renderer asks for).
+//
+// A built-in here has no entry path (resolveWidgetModule returns entry: null),
+// which upstream does not have: anywhere upstream reads `entry` as "this widget
+// has a server script", this file asks `builtin || entry` instead, or a
+// built-in's own module would never load (runWidget) or be callable
+// (callWidgetFunc).
 //
 // Not registered here: widget-ssh-server. It imports node-pty, which is not in
 // this package's dependencies (no native build for the Android runtime);
 // build/delete-list.js drops the file from src/ for the same reason.
 
+import fs from 'fs'
+import path from 'path'
 // Static imports so bundlers can include all widget modules in a single output file
 import * as widgetBatchOp from './widget-batch-op.js'
 import * as widgetLocalFileServer from './widget-local-file-server.js'
 import * as widgetLocalFtpServer from './widget-local-ftp-server.js'
-import * as widgetMcpServer from './widget-mcp-server.js'
 import * as widgetRename from './widget-rename.js'
+import * as widgetMcpServer from './widget-mcp-server.js'
 import * as widgetLog from './instance-log.js'
 import {
   listUserWidgets,
@@ -40,8 +50,18 @@ import {
   getUserWidgetDir
 } from './user-widget.js'
 import { importWidgetFromRegistry } from './widget-registry.js'
-import { isValidWidgetId } from './paths.js'
+import { isValidWidgetId, resolveUserWidgetDir, isInside } from './paths.js'
 import { sanitizeAIConfig } from './ai-config.js'
+import * as widgetApi from './api.js'
+import * as cssBus from './css-bus.js'
+import { ensureApiModule } from './api-entry.js'
+import * as requireGuard from './require-guard.js'
+import { createProxyAgent } from '../lib/proxy-agent.js'
+// import log from '../common/log.js'
+
+// From here on a widget's main.js may only require its own files, its own
+// dependencies, node built-ins and '@electerm/widget-api' (see the module).
+requireGuard.install()
 
 // Registry maps widget ID → module. Add new widgets here.
 const widgetRegistry = {
@@ -83,8 +103,8 @@ function listBuiltinWidgets () {
  *
  * One namespace, no shadowing: a user folder that reuses a built-in id is
  * ignored, and the built-in carries a warning the list can show. Silently
- * letting a user widget replace mcp-server would break features that have
- * nothing to do with the widget panel.
+ * letting a user widget replace mcp-server or ssh-server would break features
+ * that have nothing to do with the widget panel.
  */
 async function listWidgets () {
   const widgets = listBuiltinWidgets()
@@ -103,7 +123,9 @@ async function listWidgets () {
 
 // Where the entry of one widget lives, whichever root it came from. A built-in
 // has no entry path here (its module comes out of the bundle through the
-// registry), so `entry` stays null for those — check `builtin` first.
+// registry below), so `entry` stays null for those — check `builtin` first.
+// `entry` is '' for a declarative user widget: one that only ships styles and
+// has no server script at all (see readWidget in ./user-widget.js).
 function resolveWidgetModule (widgetId) {
   if (!isValidWidgetId(widgetId)) {
     throw new Error(`Invalid widget ID: ${widgetId}`)
@@ -123,9 +145,128 @@ function resolveWidgetModule (widgetId) {
 function loadWidgetModule (widgetId) {
   const { entry, builtin } = resolveWidgetModule(widgetId)
   return builtin
-    ? Promise.resolve(widgetRegistry[widgetId])
+    ? widgetRegistry[widgetId]
     : importUserWidgetModule(entry)
 }
+
+// Give a user widget's folder the '@electerm/widget-api' shim before its entry
+// is required, so `require('@electerm/widget-api')` resolves there.
+function prepareUserWidget (widgetId) {
+  ensureApiModule(resolveUserWidgetDir(widgetId), widgetId)
+}
+
+// The css of a declarative widget: every file in `electerm.styles`, in order.
+function declaredStyles (widgetId, info) {
+  const dir = resolveUserWidgetDir(widgetId)
+  const parts = []
+  for (const rel of info.styles || []) {
+    const file = path.resolve(dir, rel)
+    if (!isInside(dir, file)) {
+      throw new Error(`style file must stay inside the widget folder: ${rel}`)
+    }
+    try {
+      parts.push(`/* ${rel} */\n` + fs.readFileSync(file, 'utf8'))
+    } catch (e) {
+      throw new Error(`cannot read ${rel}: ${e.message}`)
+    }
+  }
+  return parts.join('\n')
+}
+
+/**
+ * The css one instance applies: what its manifest declares (`declaredCss`, read
+ * once at start) or what its script asked for (`css`), the latter winning and a
+ * script that removed its css winning over the manifest.
+ *
+ * This is why there is no css store anywhere in the host: an instance is the
+ * only thing that can have css, so stopping it, deleting the widget or quitting
+ * the app cannot leave a stylesheet behind.
+ */
+function cssOf (instance) {
+  if (!instance) {
+    return ''
+  }
+  return instance.css === null || instance.css === undefined
+    ? (instance.declaredCss || '')
+    : instance.css
+}
+
+function instanceFor (widgetId) {
+  for (const [, instance] of runningInstances) {
+    if (instance.widgetId === widgetId) {
+      return instance
+    }
+  }
+  return null
+}
+
+// Send one widget's current css to every app window. '' removes it, which is
+// what the renderer does when the last instance of that widget is gone.
+function broadcastCss (widgetId) {
+  const css = cssOf(instanceFor(widgetId))
+  cssBus.send(widgetId, css)
+  return css
+}
+
+/**
+ * Every running instance, in the shape the widgets panel mirrors
+ * (client/store/widgets.js refreshWidgetInstances).
+ *
+ * An instance only exists here, so this is what a renderer that just loaded —
+ * a page reload, a second window — asks for instead of keeping its own list
+ * that can drift from the truth. The panel used to build instances by hand
+ * from each run result, which meant a reload left it showing nothing as
+ * running while the instances were still alive.
+ */
+function listWidgetInstances () {
+  return [...runningInstances.values()].map(instance => ({
+    instanceId: instance.instanceId,
+    widgetId: instance.widgetId,
+    name: instance.name || instance.widgetId,
+    startedAt: instance.startedAt || 0,
+    config: instance.config || {},
+    serverInfo: instance.serverInfo || null,
+    aiConfig: instance.aiConfig || null
+  }))
+}
+
+// What a renderer that loads while widgets are running has to re-apply
+// (client/common/widget-style-host.js): derived, never stored.
+function runningCss () {
+  const out = {}
+  for (const [, instance] of runningInstances) {
+    const css = cssOf(instance)
+    if (css) {
+      out[instance.widgetId] = css
+    }
+  }
+  return out
+}
+
+// The widget api's css calls land here (see ./api.js): they change the running
+// instance and tell the renderer, nothing else.
+widgetApi.configureCss({
+  apply (widgetId, css) {
+    const instance = instanceFor(widgetId)
+    if (!instance) {
+      throw new Error(`widget ${widgetId} is not running, so it has no stylesheet to change`)
+    }
+    instance.css = cssBus.sanitize(css)
+    broadcastCss(widgetId)
+    return instance.css
+  },
+  remove (widgetId) {
+    const instance = instanceFor(widgetId)
+    if (instance) {
+      instance.css = ''
+      broadcastCss(widgetId)
+    }
+    return ''
+  },
+  get (widgetId) {
+    return cssOf(instanceFor(widgetId))
+  }
+})
 
 // Metadata for one widget: the manifest for a user widget (the package.json is
 // the source of truth), the widgetInfo export for a built-in.
@@ -156,10 +297,52 @@ function hasRunningInstance (widgetId) {
   return false
 }
 
+// A widget that is nothing but stylesheets: the manifest lists them, electerm
+// reads and applies them, and there is no server script to require (see
+// ./user-widget.js readWidget). Same lifecycle as any other instance, so the
+// panel's Run/Stop and the auto-run list work unchanged.
+function runDeclarativeWidget (widgetId, info, config) {
+  const instanceId = `${widgetId}-${Date.now()}`
+  const logger = widgetLog.loggerFor(instanceId)
+  return {
+    instanceId,
+    widgetId,
+    // same metadata a script instance carries, so listWidgetInstances can
+    // describe both without special-casing
+    name: info.name,
+    startedAt: Date.now(),
+    config: { ...(config || {}) },
+    serverInfo: null,
+    aiConfig: null,
+    // set at start, and the source of every broadcast for this widget
+    declaredCss: '',
+    css: null,
+    async start () {
+      this.declaredCss = declaredStyles(widgetId, info)
+      const css = broadcastCss(widgetId)
+      const size = Buffer.byteLength(css, 'utf8')
+      const msg = `${info.name} applied (${size} bytes of css)`
+      logger.log('info', msg)
+      return { success: true, msg }
+    },
+    async stop () {
+      logger.log('info', 'style removed')
+    }
+  }
+}
+
 async function runWidget (widgetId, config) {
-  const widget = await loadWidgetModule(widgetId)
+  const { entry, builtin } = resolveWidgetModule(widgetId)
   const info = await getWidgetInfo(widgetId)
   const { type, singleInstance } = info
+  // the '@electerm/widget-api' shim has to be on disk before the entry is
+  // loaded; built-in widgets import the host's own modules and need nothing
+  if (!builtin) {
+    prepareUserWidget(widgetId)
+  }
+  // A built-in has no entry path (see resolveWidgetModule above) and still has
+  // a server script: only a declarative user widget skips the module load.
+  const widget = builtin || entry ? await loadWidgetModule(widgetId) : {}
 
   if (type !== 'instance') {
     // A UI-only widget (frontend) has nothing to start: the panel is its
@@ -170,22 +353,61 @@ async function runWidget (widgetId, config) {
     return widget.widgetRun(config)
   }
 
-  if (typeof widget.widgetRun !== 'function') {
-    throw new Error(`Widget ${widgetId} has no widgetRun export`)
-  }
-
   // Check if singleInstance widget already has a running instance
   if (singleInstance && hasRunningInstance(widgetId)) {
     return Promise.reject(new Error(`Widget ${widgetId} already has a running instance. Only one instance is allowed.`))
   }
 
+  if (typeof widget.widgetRun !== 'function') {
+    if (!(info.styles || []).length) {
+      throw new Error(`Widget ${widgetId} has no widgetRun export`)
+    }
+    const instance = runDeclarativeWidget(widgetId, info, config)
+    runningInstances.set(instance.instanceId, instance)
+    widgetApi.bindInstance(widgetId, instance.instanceId)
+    return instance.start()
+      .then(result => ({
+        instanceId: instance.instanceId,
+        widgetId,
+        singleInstance: !!singleInstance,
+        ...result
+      }))
+      .catch((err) => {
+        runningInstances.delete(instance.instanceId)
+        widgetApi.unbindInstance(widgetId, instance.instanceId)
+        throw err
+      })
+  }
+
   // The widget reports through this context; it is handed the instance log
   // before it knows its own instanceId (see instance-log.js createContext).
+  // A widget that forwards AI traffic decides its own upstream proxy: electerm
+  // only supplies the agent factory, so no proxy value leaks into widget config.
   const ctx = widgetLog.createContext()
-  const instance = widget.widgetRun(config, ctx)
+  ctx.createProxyAgent = createProxyAgent
+  const instance = widget.widgetRun({ ...(config || {}) }, ctx)
   instance.widgetId = widgetId
+  // A UI widget's exported functions close over this module's state. Requiring
+  // the entry again (a re-import purges the require cache) would hand the panel
+  // a fresh module with empty state while this instance is still running.
+  instance.widgetModule = widget
+  // What the panel shows for a running instance (listWidgetInstances): the
+  // widget's name, when it started, and the config it was started with.
+  instance.name = info.name
+  instance.startedAt = Date.now()
+  instance.config = { ...(config || {}) }
+  instance.serverInfo = null
+  instance.aiConfig = null
+  // A widget with a script may still declare stylesheets; its own api.css calls
+  // then replace them (see cssOf).
+  instance.declaredCss = !builtin && (info.styles || []).length
+    ? declaredStyles(widgetId, info)
+    : ''
+  instance.css = null
   runningInstances.set(instance.instanceId, instance)
   ctx.bind(instance.instanceId)
+  // api.log / api.event land in this instance's log from here on
+  widgetApi.bindInstance(widgetId, instance.instanceId)
 
   const logger = widgetLog.loggerFor(instance.instanceId)
   logger.log('info', `Starting ${info.name} (${widgetId})`)
@@ -193,15 +415,19 @@ async function runWidget (widgetId, config) {
   return instance.start()
     .then((result) => {
       logger.log('info', result && result.msg ? result.msg : 'Started')
+      // what the panel shows for this instance after a reload: the address it
+      // serves on, and an AI config it offered (sanitised at the boundary, see
+      // ./ai-config.js — the renderer only ever sees the whitelisted fields)
+      instance.serverInfo = (result && result.serverInfo) || null
+      instance.aiConfig = sanitizeAIConfig(result && result.aiConfig)
+      // declared css (if any) goes live now, in the renderer
+      broadcastCss(widgetId)
       return {
         instanceId: instance.instanceId,
         widgetId,
         singleInstance: !!singleInstance,
         ...result,
-        // A widget may offer an AI config for the user to apply; it is
-        // sanitised here, on the way out of the main process, so the renderer
-        // only ever sees the whitelisted fields (see ./ai-config.js).
-        aiConfig: sanitizeAIConfig(result && result.aiConfig)
+        aiConfig: instance.aiConfig
       }
     })
     .catch((err) => {
@@ -209,6 +435,11 @@ async function runWidget (widgetId, config) {
       // to read when the widget refuses to start
       logger.log('error', `Failed to start: ${err && err.message ? err.message : err}`)
       runningInstances.delete(instance.instanceId)
+      widgetApi.unbindInstance(widgetId, instance.instanceId)
+      // the window may already have the declared css of a widget that died
+      if (!hasRunningInstance(widgetId)) {
+        cssBus.send(widgetId, '')
+      }
       return instance.stop().catch(() => {}).then(() => { throw err })
     })
 }
@@ -227,6 +458,10 @@ function stopWidget (instanceId) {
     .then(() => {
       logger.log('info', 'Stopped')
       runningInstances.delete(instanceId)
+      widgetApi.unbindInstance(instance.widgetId, instanceId)
+      // The css lived on the instance, so it is already gone here: broadcast the
+      // recomputed value ('' once the last instance of that widget stopped).
+      broadcastCss(instance.widgetId)
       return { instanceId, status: 'stopped' }
     })
     .catch((err) => {
@@ -261,10 +496,24 @@ async function runWidgetFunc (instanceId, funcName, ...args) {
  * This is what a custom widget UI talks to: for `frontend` widgets there is no
  * instance to call methods on (runWidgetFunc needs one), and the panel is an
  * iframe the module never gets a handle to. Only own properties are reachable,
- * the same rule the runSync bridge itself follows.
+ * the same rule the runSync bridge itself follows. When an instance is
+ * running, its own module is used, so a re-import that clears the module cache
+ * cannot leave the UI talking to a second, empty copy of the widget state.
  */
 async function callWidgetFunc (widgetId, funcName, ...args) {
-  const widget = await loadWidgetModule(widgetId)
+  const { entry, builtin } = resolveWidgetModule(widgetId)
+  if (!builtin) {
+    prepareUserWidget(widgetId)
+  }
+  // Prefer the module the running instance was created from: its state is the
+  // state the widget UI is supposed to talk to. Frontend widgets have no
+  // instance, so they fall back to a plain module load.
+  const running = [...runningInstances.values()]
+    .find(({ widgetId: id }) => id === widgetId)
+  if (!builtin && !entry && !(running && running.widgetModule)) {
+    throw new Error(`Widget ${widgetId} has no server script to call`)
+  }
+  const widget = (running && running.widgetModule) || await loadWidgetModule(widgetId)
   if (
     typeof funcName !== 'string' ||
     !Object.prototype.hasOwnProperty.call(widget, funcName) ||
@@ -305,6 +554,8 @@ async function deleteWidget (widgetId) {
     }
   }
   await Promise.allSettled(stops)
+  // no instance left, so derived css is gone too; tell the windows
+  cssBus.send(widgetId, '')
   return removeUserWidget(widgetId)
 }
 
@@ -361,5 +612,10 @@ export {
   importWidgetFromUrl as importWidgetFromSource,
   importWidgetFromRegistry,
   deleteWidget,
-  resolveWidgetModule
+  resolveWidgetModule,
+  // what a renderer that just loaded has to know about running widgets
+  listWidgetInstances,
+  // what a renderer that just loaded has to re-apply (client/common/widget-style-host.js)
+  runningCss,
+  broadcastCss
 }

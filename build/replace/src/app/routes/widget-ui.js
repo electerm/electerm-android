@@ -46,6 +46,7 @@ import {
   isInside
 } from '../widgets/paths.js'
 import bridgeSource from '../widgets/bridge.js'
+import { bp } from '../server/base-path.js'
 
 const BRIDGE_FILE = '__bridge.js'
 
@@ -92,7 +93,7 @@ function mimeTypeOf (file) {
 // Put the bridge first in <head> so window.electerm exists before any script
 // the widget loads from there.
 function injectBridge (html, id) {
-  const tag = `<script src="/api/widget-ui/${id}/${BRIDGE_FILE}"></script>`
+  const tag = `<script src="${bp(`/api/widget-ui/${id}/${BRIDGE_FILE}`)}"></script>`
   const head = /<head[^>]*>/i.exec(html)
   if (head) {
     const at = head.index + head[0].length

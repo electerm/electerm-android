@@ -73,6 +73,10 @@ export function buildViewData (opts = {}) {
     // where a bookmark icon downloaded into <data dir>/icons is served from
     // (routes/icon.js), a constant of the app rather than of the device
     iconServePath: '/api/icon/',
+    // no BASE_PATH on the device: the local server serves the app from its
+    // own root, so the sub-path prefix index.pug prepends stays empty.
+    // Without it pug renders the literal "undefined/css/style-<ver>.css".
+    basePath: '',
     cdn,
     query: opts.query || {},
     server: opts.server || '',
