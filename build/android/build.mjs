@@ -468,7 +468,8 @@ function copyEnv () {
 
 function writeNodeEntry () {
   const entry = `import { resolve } from 'node:path'
-import { mkdirSync } from 'node:fs'
+import { accessSync, constants, mkdirSync } from 'node:fs'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const __d = fileURLToPath(new URL('.', import.meta.url))
@@ -528,6 +529,37 @@ process.env.DB_PATH = userDataDir
 const sshDir = resolve(userDataDir, '.ssh')
 mkdirSync(sshDir, { recursive: true })
 process.env.HOME = userDataDir
+
+// Android has no /tmp and sets no TMPDIR, so os.tmpdir() answers "/tmp" — a
+// path inside the read-only filesystem root that the app can neither create
+// nor write. Anything that stages a download in the system temp dir then dies
+// with, e.g. installing a widget from a URL:
+//   fs.mkdtempSync(join(os.tmpdir(), 'electerm-widget-'))
+//   -> ENOENT: no such file or directory, mkdtemp '/tmp/electerm-widget-XXXXXX'
+// (EACCES once the directory happens to exist, as it does on an emulator).
+// Keep the temp root inside the writable user-data dir: same volume as the
+// widgets folder the staging area is copied into, and it survives restarts
+// that the app's own cache dir does not guarantee.
+const tmpDir = resolve(userDataDir, 'tmp')
+mkdirSync(tmpDir, { recursive: true })
+// The engine ignores TMPDIR for os.tmpdir() (verified on device: env set,
+// os.tmpdir() still "/tmp"), so the env vars alone are not enough — the
+// function has to be overridden for the JS callers. Set the vars too: spawned
+// tools and packages that read TMPDIR/TMP/TEMP directly use them.
+process.env.TMPDIR = tmpDir
+process.env.TMP = tmpDir
+process.env.TEMP = tmpDir
+const tmpUsable = (() => {
+  try {
+    accessSync(os.tmpdir(), constants.W_OK)
+    return true
+  } catch (e) {
+    return false
+  }
+})()
+if (!tmpUsable) {
+  os.tmpdir = () => tmpDir
+}
 
 await import('./app.bundle.mjs')
 `
