@@ -15,6 +15,8 @@
 [electerm-web](https://github.com/electerm/electerm-web) 代码库，使用
 [Capacitor](https://capacitorjs.com/) 和设备端 Node.js 运行时构建。
 
+可在 [Google Play](https://play.google.com/store/apps/details?id=org.electerm.electerm) 下载。
+
 > **关于本地终端和串口的说明：** electerm Android 版目前**不支持**本地终端和串口。
 > 这些功能依赖于原生库（`node-pty`、`serialport`），目前无法为 Android 编译。
 > 未来在原生依赖移植完成后有潜力添加这些功能。SSH、SFTP、Telnet、FTP、RDP、VNC

@@ -14,6 +14,8 @@ Open-sourced ssh/sftp/telnet/RDP/VNC/Spice/ftp client for Android, built on top 
 [electerm-web](https://github.com/electerm/electerm-web) codebase with
 [Capacitor](https://capacitorjs.com/) and an on-device Node.js runtime.
 
+Download on [Google Play](https://play.google.com/store/apps/details?id=org.electerm.electerm).
+
 > **Note on local terminal & serial port:** electerm for Android currently does
 > **not** support the local terminal or serial port. These features rely on
 > native libraries (`node-pty`, `serialport`) that can not be built for Android
