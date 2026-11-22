@@ -27,11 +27,8 @@ on:
         type: choice
         options: [draft, completed, inProgress, halted]
         default: draft
-      release_notes:
-        description: 'Release notes for this version'
-        type: string
-        default: ''
-
+  push:
+    branches: [ build ]
 permissions:
   contents: read
 
@@ -212,19 +209,13 @@ jobs:
       - name: Write release notes
         # The upload action reads per-locale release notes from a directory of
         # files named whatsnew-<BCP47 locale>. Play shows these in the store
-        # listing. If no notes were supplied, fall back to a generic line so
-        # the directory is never empty (the action requires at least one file).
-        env:
-          NOTES: ${{ inputs.release_notes }}
-          VERSION: ${{ steps.version.outputs.version }}
+        # listing. Electerm has a single release-notes source of truth on the
+        # website, so always point users there instead of duplicating a changelog
+        # per release (the action requires at least one file).
         run: |
           mkdir -p distribution/whatsnew
-          if [ -n "$NOTES" ]; then
-            printf '%s\n' "$NOTES" > distribution/whatsnew/whatsnew-en-US
-          else
-            printf 'electerm for Android v%s\n' "$VERSION" \
-              > distribution/whatsnew/whatsnew-en-US
-          fi
+          printf '%s\n' 'check electerm.org for detail' \
+            > distribution/whatsnew/whatsnew-en-US
           cat distribution/whatsnew/whatsnew-en-US
 
       - name: Upload to Google Play
