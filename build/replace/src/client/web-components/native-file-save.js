@@ -32,8 +32,6 @@
 
 import message from '../electerm-react/components/common/message'
 
-let cachedSaver = null
-
 // ---------------------------------------------------------------------------
 // window.ElectermNative bridge plumbing
 // ---------------------------------------------------------------------------
@@ -161,14 +159,6 @@ function absoluteUrl (u) {
   }
 }
 
-function currentToken () {
-  try {
-    return (window.store && window.store.config && window.store.config.tokenElecterm) || ''
-  } catch (e) {
-    return ''
-  }
-}
-
 function isNativePlatform () {
   try {
     // Capacitor core itself detects android via window.androidBridge (the
@@ -214,23 +204,22 @@ function hasNativeFileSharer () {
   }
 }
 
-async function getFileSharer () {
-  if (cachedSaver !== null) return cachedSaver
+// Return the module. Returning the Capacitor proxy from an async function
+// makes Promise resolution invoke a native method named "then".
+async function loadFileSharer () {
   try {
-    const mod = await import('@capgo/capacitor-file-sharer')
-    cachedSaver = mod && mod.FileSharer ? mod.FileSharer : false
-  } catch (e) {
-    cachedSaver = false
+    return await import('@capgo/capacitor-file-sharer')
+  } catch {
+    return null
   }
-  return cachedSaver
 }
 
 export async function canSaveNative () {
   if (getElectermNative()) return true
   if (!isNativePlatform()) return false
   if (!hasNativeFileSharer()) return false
-  const saver = await getFileSharer()
-  return !!saver
+  const module = await loadFileSharer()
+  return !!module?.FileSharer
 }
 
 // Diagnostic helper for on-device debugging (remote inspector console):
@@ -264,8 +253,8 @@ export async function downloadDiag () {
     info.capacitorPlatform = 'error: ' + (e && e.message)
   }
   try {
-    const saver = await getFileSharer()
-    info.fileSharerModuleLoaded = !!saver
+    const module = await loadFileSharer()
+    info.fileSharerModuleLoaded = !!module?.FileSharer
   } catch (e) {
     info.fileSharerModuleLoaded = 'error: ' + (e && e.message)
   }
@@ -276,7 +265,7 @@ export async function downloadDiag () {
 }
 
 async function saveBase64Native ({ filename, base64Data, contentType }) {
-  const FileSharer = await getFileSharer()
+  const { FileSharer } = await loadFileSharer() || {}
   if (!FileSharer) throw new Error('native file saver unavailable')
   const res = await FileSharer.save({
     filename,
@@ -329,7 +318,7 @@ function anchorDownloadFallback (filename, blob) {
 
 /**
  * Replacement for the broken-in-WebView blob-anchor download.
- * Fetches /api/download (token header included) and saves the result to
+ * Fetches /api/download and saves the result to
  * the public Downloads collection via MediaStore when running natively.
  * On plain desktop web it falls back to the classic blob-anchor download.
  * Inside Android WebView WITHOUT a working native saver it reports an
@@ -345,7 +334,6 @@ export async function downloadPathFromServer (serverPath) {
     try {
       const res = await callElectermNative('saveUrl', [
         absoluteUrl(url),
-        currentToken(),
         fallbackName
       ])
       const name = (res && res.name) || fallbackName

@@ -1,10 +1,11 @@
-import { verify, jwtAuth, errHandler } from '../lib/jwt.js'
+import { createBrowserAuth } from '../lib/browser-auth.js'
 import express from 'express'
 import { wsRoutes } from '../routes/ws.js'
 import { httpRoutes } from '../routes/http.js'
 import { applyExtensions } from '../lib/extensions.js'
 import morgan from 'morgan'
 import {
+  basePath,
   isDev,
   cwd
 } from '../common/runtime-constants.js'
@@ -21,6 +22,7 @@ export async function createApp () {
     log.info(`[TLS] loaded ${loadedCount} system CA certificate(s) into main process`)
   }
 
+  const auth = createBrowserAuth({ ...process.env, ENABLE_AUTH: '' }, basePath)
   const app = express()
   // optional BASE_PATH sub-path, see ./base-path.js
   app.use(stripBasePath())
@@ -46,18 +48,8 @@ export async function createApp () {
     app.set('views', resolve(cwd, 'src/app/views'))
   }
 
-  httpRoutes(app)
-  wsRoutes(app, {
-    verifyClient: ({ req }) => {
-      try {
-        const token = new URL(req.url, 'http://localhost').searchParams.get('token')
-        return verify(token).id === process.env.SERVER_USER
-      } catch {
-        return false
-      }
-    },
-    trackSocket: () => {}
-  })
+  httpRoutes(app, auth)
+  wsRoutes(app, auth)
   // Widget stylesheets are applied in the renderer, so a widget's css has to
   // reach the browser: this is the web app's counterpart of the desktop
   // ipc broadcast (see ipc.js and client/common/widget-style-host.js). A tab
@@ -73,6 +65,6 @@ export async function createApp () {
       log.error('widget css broadcast fails', e)
     }
   })
-  await applyExtensions(app, (req, res, next) => jwtAuth(req, res, err => err ? errHandler(err, req, res, next) : next()))
+  await applyExtensions(app, auth.requireSession)
   return app
 }

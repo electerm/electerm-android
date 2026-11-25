@@ -75,7 +75,7 @@ AAB 里有三个 ABI 的原生库，Play 会按设备裁剪，所以真实下载
 
 #### 「应用访问」怎么写
 
-这个应用**不需要登录**就能用（`ENABLE_AUTH` 未开启，Web UI 自动登录），
+这个应用**不需要登录**就能用，
 内置服务器只监听 `127.0.0.1`。所以照实写即可：
 
 > 本应用无需登录或任何特殊访问权限即可使用全部功能。启动后直接进入主界面，
@@ -504,7 +504,6 @@ cd /Users/zxd/dev/electerm-android
 gh secret set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON < service-account.json
 
 # 以下已存在，无需改动
-#   SERVER_SECRET
 #   ANDROID_RELEASE_KEYSTORE_BASE64
 #   ANDROID_RELEASE_KEYSTORE_PASSWORD
 #   ANDROID_RELEASE_KEY_ALIAS

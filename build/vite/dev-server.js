@@ -16,7 +16,6 @@ import os from 'os'
 import copy from 'json-deep-copy'
 import proxy from 'express-http-proxy'
 import fsFunctions from '../../src/app/common/fs-functions.js'
-import { createToken } from '../../src/app/lib/jwt.js'
 import { logDir } from '../../src/app/server/session-log.js'
 import { getIconDir } from '../../src/app/lib/icon-download.js'
 import { resolve } from 'path'
@@ -66,7 +65,7 @@ const base = {
   iconServePath: '/api/icon/',
   iconDir: getIconDir(),
   sysMenu,
-  tokenElecterm: process.env.ENABLE_AUTH ? '' : createToken()
+  serverPort: port
 }
 let needMigrate
 function checkNeedMigrate () {

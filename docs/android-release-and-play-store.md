@@ -299,7 +299,6 @@ Inputs: `track` (internal / alpha / beta / production), `status`
 
 | Secret | Value | Status |
 |---|---|---|
-| `SERVER_SECRET` | JWT secret for the on-device electerm server | exists |
 | `ANDROID_RELEASE_KEYSTORE_BASE64` | base64 of the upload-key `.keystore` | exists |
 | `ANDROID_RELEASE_KEYSTORE_PASSWORD` | keystore store password | exists |
 | `ANDROID_RELEASE_KEY_ALIAS` | keystore key alias | exists |

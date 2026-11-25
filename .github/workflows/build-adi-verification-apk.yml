@@ -74,8 +74,6 @@ jobs:
         run: npm --prefix build/android install
 
       - name: Build web frontend + Node.js backend bundle
-        env:
-          SERVER_SECRET: ${{ secrets.SERVER_SECRET }}
         run: npm run build:android
 
       - name: Add Android platform (first run only)

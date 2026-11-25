@@ -43,24 +43,6 @@ const VERSION = JSON.parse(
   fs.readFileSync(path.resolve(ROOT, 'package.json'), 'utf8')
 ).version
 
-// JWT secret for the on-device server.
-// In CI (GitHub Actions) this MUST be provided via the SERVER_SECRET Action
-// secret. For local development a fixed fallback is used.
-const LOCAL_DEV_SECRET = 'electerm-android-local-dev-secret'
-const SERVER_SECRET = process.env.SERVER_SECRET || LOCAL_DEV_SECRET
-// The single user the on-device server authenticates (dispatch-center's
-// verifyWs compares the token's `id` against process.env.SERVER_USER).
-//
-// Both sides MUST come from this one value. The homepage token is signed here
-// with `id: SERVER_USER`, and index.js has to export the same string before the
-// backend bundle loads — otherwise verifyWs throws, express-ws never attaches
-// the `message` handler, and every WS RPC dies silently: no langMap (the UI
-// renders raw i18n keys), no bookmark list, and the save button does nothing.
-//
-// Relying on `.env` was the trap: it is gitignored, so a local build baked
-// `id: default_user` into the token while the copy shipped on the device had no
-// SERVER_USER at all, and `undefined !== 'default_user'` rejected every socket.
-const SERVER_USER = process.env.SERVER_USER || 'default_user'
 // The package.json the node project carries on the device. The server reads it
 // as `packInfo`, so the build-time homepage must embed the same object — not
 // this repo's package.json, which runtime-constants would otherwise pick up.
@@ -69,14 +51,6 @@ const NODE_PKG = {
   version: VERSION,
   main: 'index.js',
   type: 'module'
-}
-const IS_CI = !!process.env.CI
-if (IS_CI && SERVER_SECRET === LOCAL_DEV_SECRET) {
-  console.error(
-    '[android] FATAL: SERVER_SECRET is not set. ' +
-    'Add it to the repository GitHub Actions secrets (gh secret set SERVER_SECRET).'
-  )
-  process.exit(1)
 }
 
 // --------------------------------------------------------------------------
@@ -486,15 +460,6 @@ process.chdir(__d)
 process.env.NODE_ENV = 'production'
 process.env.HOST = '127.0.0.1'
 process.env.PORT = '5577'
-// JWT secret baked in at build time. In CI this comes from the SERVER_SECRET
-// GitHub Action secret; locally it falls back to a fixed dev value.
-// The web UI auto-logs-in because ENABLE_AUTH is not set.
-process.env.SERVER_SECRET = ${JSON.stringify(SERVER_SECRET)}
-// Must match the id in the homepage JWT (gen-index-html signs with this same
-// value). verifyWs compares them and throws on mismatch, which silently kills
-// the whole WS channel: no langMap, no bookmarks, dead save button.
-// See the SERVER_USER comment at the top of this file.
-process.env.SERVER_USER = ${JSON.stringify(SERVER_USER)}
 // No real pty on Android -> disable the local terminal feature.
 process.env.DISABLE_LOCAL_TERMINAL = '1'
 // No VIEW_FOLDER: the one template is precompiled into the bundle.
@@ -699,8 +664,6 @@ async function main () {
   // Static homepage. Must run after runVite(), which recreates dist/assets.
   const index = await generateIndexHtml({
     outDir: path.resolve(NODEJS_DIR, 'dist', 'assets'),
-    secret: SERVER_SECRET,
-    user: SERVER_USER,
     packInfo: NODE_PKG
   })
   console.log(

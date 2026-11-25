@@ -53,7 +53,6 @@ const data = {
   siteName: pack.name,
   isDev: false,
   cdn: '',
-  tokenElecterm: '',
   defaultAIPreset,
   downloadUpgradeFromBrowser: true,
   versionFile: 'version-android.html',

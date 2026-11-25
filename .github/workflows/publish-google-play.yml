@@ -3,7 +3,6 @@ name: Publish Android AAB to Google Play
 # Builds a signed Android App Bundle (.aab) and uploads it to Google Play.
 #
 # Required repository secrets (gh secret set NAME):
-#   SERVER_SECRET                        JWT secret for the on-device electerm server
 #   ANDROID_RELEASE_KEYSTORE_BASE64      base64 of the upload-key .keystore
 #   ANDROID_RELEASE_KEYSTORE_PASSWORD    keystore store password
 #   ANDROID_RELEASE_KEY_ALIAS            keystore key alias
@@ -21,7 +20,7 @@ on:
         description: 'Play track to publish to'
         type: choice
         options: [internal, alpha, beta, production]
-        default: internal
+        default: production
       status:
         description: 'Release status (draft = staged, completed = goes live in the track)'
         type: choice
@@ -36,6 +35,10 @@ jobs:
   publish:
     name: Build AAB and upload to Google Play
     runs-on: ubuntu-latest
+    env:
+      # Push events have no workflow_dispatch inputs.
+      PLAY_TRACK: ${{ inputs.track || 'production' }}
+      PLAY_STATUS: ${{ inputs.status || 'draft' }}
 
     steps:
       - name: Checkout
@@ -79,10 +82,6 @@ jobs:
         run: npm --prefix build/android install
 
       - name: Build web frontend + Node.js backend bundle
-        env:
-          # JWT secret for the on-device electerm server. Baked into the bundle
-          # at build time by build/android/build.mjs.
-          SERVER_SECRET: ${{ secrets.SERVER_SECRET }}
         run: npm run build:android
 
       - name: Add Android platform (first run only)
@@ -224,23 +223,21 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: org.electerm.electerm
           releaseFiles: build/android/android/app/build/outputs/bundle/release/app-release.aab
-          tracks: ${{ inputs.track }}
-          status: ${{ inputs.status }}
+          tracks: ${{ env.PLAY_TRACK }}
+          status: ${{ env.PLAY_STATUS }}
           releaseName: v${{ github.run_number }}-${{ github.sha }}
           whatsNewDirectory: distribution/whatsnew
 
       - name: Summarise
         env:
-          TRACK: ${{ inputs.track }}
-          STATUS: ${{ inputs.status }}
           VERSION: ${{ steps.version.outputs.version }}
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
         run: |
           {
             echo "### Google Play upload"
             echo ""
-            echo "- track: \`${TRACK}\`"
-            echo "- status: \`${STATUS}\`"
+            echo "- track: \`${PLAY_TRACK}\`"
+            echo "- status: \`${PLAY_STATUS}\`"
             echo "- package: \`org.electerm.electerm\`"
             echo "- version: \`${VERSION}\`"
             echo "- versionCode: \`${VERSION_CODE}\`"

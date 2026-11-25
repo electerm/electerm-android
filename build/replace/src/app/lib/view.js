@@ -17,7 +17,6 @@ import {
   isWin,
   home
 } from '../common/runtime-constants.js'
-import { createToken } from './jwt.js'
 import { logDir } from '../server/session-log.js'
 import { getLogDir } from '../widgets/instance-log.js'
 import { buildViewData } from './view-data.js'
@@ -42,10 +41,7 @@ export async function index (req, res) {
     // the folder the downloaded bookmark icons live in; the client needs it to
     // tell a path that has a url (routes/icon.js) from one that does not
     iconDir: getIconDir(),
-    query: req.query,
-    // The web UI auto-logs-in while ENABLE_AUTH is unset, which is how a
-    // password-less install gets a usable API token.
-    tokenElecterm: process.env.ENABLE_AUTH ? undefined : createToken()
+    query: req.query
   })
   res.render('index', data)
 }

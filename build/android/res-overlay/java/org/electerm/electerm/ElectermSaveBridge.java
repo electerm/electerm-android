@@ -47,7 +47,7 @@ import java.util.regex.Pattern;
  * ------------
  * Exposes two methods to the page as `window.ElectermNative`:
  *
- *   saveUrl(url, token, fallbackName, callbackId)
+ *   saveUrl(url, fallbackName, callbackId)
  *     Streams an /api/download response straight into the public Downloads
  *     collection (MediaStore on Android 10+, the public/external Downloads
  *     dir before that). Streamed, so big files and directory tarballs never
@@ -94,20 +94,17 @@ public class ElectermSaveBridge {
     }
 
     /**
-     * Fetch `url` (with the electerm token header) and store the response
+     * Fetch `url` and store the response
      * body in the public Downloads collection.
      */
     @JavascriptInterface
-    public void saveUrl(final String url, final String token, final String fallbackName, final String callbackId) {
+    public void saveUrl(final String url, final String fallbackName, final String callbackId) {
         submit(callbackId, new Job() {
             @Override
             public JSONObject run() throws Exception {
                 HttpURLConnection conn = null;
                 try {
                     conn = (HttpURLConnection) new URL(url).openConnection();
-                    if (token != null && token.length() > 0) {
-                        conn.setRequestProperty("token", token);
-                    }
                     conn.setRequestMethod("GET");
                     conn.setConnectTimeout(15000);
                     conn.setReadTimeout(120000);
