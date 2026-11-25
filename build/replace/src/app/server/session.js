@@ -10,7 +10,10 @@ import * as sessionRdp from './session-rdp.js'
 import * as sessionVnc from './session-vnc.js'
 import * as sessionSpice from './session-spice.js'
 
+import * as sessionFtp from './session-ftp.js'
+
 const sessionModules = {
+  ftp: sessionFtp,
   ssh: sessionSsh,
   telnet: sessionTelnet,
   serial: sessionSerial,
@@ -28,6 +31,7 @@ function getType (initOptions) {
     'local',
     'rdp',
     'vnc',
+    'ftp',
     'spice'
   ].includes(type)
     ? type

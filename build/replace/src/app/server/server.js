@@ -1,3 +1,4 @@
+import { verify, jwtAuth, errHandler } from '../lib/jwt.js'
 import express from 'express'
 import { wsRoutes } from '../routes/ws.js'
 import { httpRoutes } from '../routes/http.js'
@@ -46,7 +47,17 @@ export async function createApp () {
   }
 
   httpRoutes(app)
-  wsRoutes(app)
+  wsRoutes(app, {
+    verifyClient: ({ req }) => {
+      try {
+        const token = new URL(req.url, 'http://localhost').searchParams.get('token')
+        return verify(token).id === process.env.SERVER_USER
+      } catch {
+        return false
+      }
+    },
+    trackSocket: () => {}
+  })
   // Widget stylesheets are applied in the renderer, so a widget's css has to
   // reach the browser: this is the web app's counterpart of the desktop
   // ipc broadcast (see ipc.js and client/common/widget-style-host.js). A tab
@@ -62,6 +73,6 @@ export async function createApp () {
       log.error('widget css broadcast fails', e)
     }
   })
-  await applyExtensions(app)
+  await applyExtensions(app, (req, res, next) => jwtAuth(req, res, err => err ? errHandler(err, req, res, next) : next()))
   return app
 }
