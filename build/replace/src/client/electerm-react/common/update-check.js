@@ -2,7 +2,7 @@
  * check latest release for update warn
  *
  * ANDROID OVERLAY of @electerm/electerm-react/client/common/update-check.js.
- * Only the mirror URL construction differs from upstream; see
+ * APK asset matching and mirror URL construction are Android-specific; see
  * ./download-mirror.js for why. Everything else is kept in sync with the
  * package so this file can be dropped once upstream ships the same fix
  * (install.js applies build/replace/src/client/electerm-react/** last).
@@ -14,6 +14,7 @@ import {
   baseUpdateCheckUrls, packInfo
 } from './constants'
 import dayjs from 'dayjs'
+import normalizeReleaseTag from './normalize-release-tag'
 
 async function fetchData (url, options) {
   const data = {
@@ -63,25 +64,10 @@ export async function getLatestReleaseVersion (n) {
     }, '')
   }
   const versionFile = window.et.versionFile || 'version.html'
-  let url = `${baseUpdateCheckUrls[0]}/${versionFile}${q}`
-  let tagName = await getInfo(url)
-  if (!tagName) {
-    url = `${baseUpdateCheckUrls[1]}/${versionFile}${q}`
-    tagName = await getInfo(url)
+  for (const base of baseUpdateCheckUrls) {
+    const tag = normalizeReleaseTag(await getInfo(`${base}/${versionFile}${q}`))
+    if (tag) return { tag_name: tag }
   }
-  if (tagName) {
-    return {
-      tag_name: tagName
-    }
-  }
-}
-
-// Kept as an export because other client code may import it by name. The
-// upstream implementation hardcoded "electerm/electerm", which is the desktop
-// repo; APKs are released from "electerm/electerm-android" on both hosts, so
-// the owner/repo has to come from the real download URL served by electerm.org.
-export function getAtomgitUrl (url) {
-  return mirrorUrl(url, 'atomgit')
 }
 
 export function getDownloadUrl (browserDownloadUrl, mirror) {
@@ -100,7 +86,7 @@ export async function getLatestReleaseInfo () {
   if (!res || !res.release) {
     return undefined
   }
-  const asset = (res.release.assets || []).find(r => r.name.includes(installSrc))
+  const asset = (res.release.assets || []).find(r => installSrc && r.name.includes(installSrc))
   return {
     body: res.release.body,
     date: dayjs(res.release.published_at).format('YYYY-MM-DD'),
